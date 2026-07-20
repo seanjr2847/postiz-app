@@ -102,6 +102,27 @@ export const useMenuItem = () => {
       path: '/media',
     },
     {
+      name: t('video_studio', 'Video Studio'),
+      icon: (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="20"
+          height="21"
+          viewBox="0 0 20 21"
+          fill="none"
+        >
+          <path
+            d="M13.3334 8.16667L17.0743 6.29622C17.4986 6.08407 18 6.39271 18 6.86702V14.133C18 14.6073 17.4986 14.9159 17.0743 14.7038L13.3334 12.8333M4.33341 17H11.6667C12.5872 17 13.3334 16.2538 13.3334 15.3333V5.66667C13.3334 4.74619 12.5872 4 11.6667 4H4.33341C3.41294 4 2.66675 4.74619 2.66675 5.66667V15.3333C2.66675 16.2538 3.41294 17 4.33341 17Z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ),
+      path: '/video-studio',
+    },
+    {
       name: t('plugs', 'Plugs'),
       icon: (
         <svg
