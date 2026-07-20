@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { CreationMethod, Organization } from '@prisma/client';
+import { Organization } from '@prisma/client';
 import { MarketingStudioRepository } from '@gitroom/nestjs-libraries/database/prisma/marketing-studio/marketing-studio.repository';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
@@ -133,11 +133,8 @@ export class MarketingStudioService {
       posts: [],
     } as unknown as CreatePostDto;
 
-    const result = await this._postsService.createPost(
-      orgId,
-      dto,
-      CreationMethod.WEB
-    );
+    // v2.11.3 의 createPost 는 (orgId, dto) 2인자. (schedule 은 아직 stub — CreatePostDto 매핑 TODO)
+    const result = await this._postsService.createPost(orgId, dto);
 
     const postId = result?.[0]?.postId;
     if (postId) {
