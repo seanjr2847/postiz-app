@@ -1,6 +1,9 @@
 name: VS Image (fork)
 on:
   workflow_dispatch:
+  push:
+    branches: [video-studio]
+    paths: ['.github/workflows/vs-image.yml']
 jobs:
   image:
     runs-on: ubuntu-latest
