@@ -69,34 +69,39 @@ export class MarketingStudioService {
    * (MediaService.generateVideo -> Remotion provider.process -> uploadSimple -> saveFile),
    * then link the produced Media onto the variant.
    */
-  async render(orgId: string, variantId: string) {
-    const variant = await this._repository.getVariant(orgId, variantId);
+  async render(org: Organization, variantId: string) {
+    const variant = await this._repository.getVariant(org.id, variantId);
     if (!variant) {
       throw new BadRequestException('Variant not found');
     }
 
-    const brand = await this._repository.getBrand(orgId, variant.brandId);
+    const brand = await this._repository.getBrand(org.id, variant.brandId);
     if (!brand) {
       throw new BadRequestException('Brand not found');
     }
 
+    // 렌더 계약 v2 — DB 브랜드 토큰/폰트 + 포맷 + spec 을 렌더타임 input props 로 넘겨
+    // format-<format> 제네릭 컴포지션을 렌더(render-server v2). JSON 컬럼은 파싱.
     const videoDto: VideoDto = {
       type: 'remotion',
       output: 'vertical',
-      // NOTE: the existing Remotion provider (RemotionParams) renders by { project, id }
-      // (render contract v1). Contract v2 — injecting brand tokens + format + spec as
-      // props so DB content renders — is Phase 3.5 engine work. See video-studio-design.md §4.
-      customParams: { project: brand.slug, id: variant.id },
+      customParams: {
+        brand: {
+          tokens: JSON.parse(brand.tokens),
+          fonts: JSON.parse(brand.fonts),
+          mascotPrefix: brand.mascotPrefix,
+        },
+        format: variant.format,
+        spec: JSON.parse(variant.spec),
+        caption: variant.caption ?? undefined,
+      },
     };
 
-    // TODO(running-app): MediaService.generateVideo() needs the full Organization for
-    // SubscriptionService credit/trial checks. In the running app, thread the Organization
-    // from @GetOrgFromRequest() through the controller/service instead of this id-only stub.
-    const org = { id: orgId } as Organization;
-
+    // 전체 Organization 전달(SubscriptionService 크레딧/트라이얼 체크) — 컨트롤러가
+    // @GetOrgFromRequest() 로 받은 org 를 그대로 넘긴다.
     const media = await this._mediaService.generateVideo(org, videoDto);
 
-    await this._repository.setVariantMedia(orgId, variantId, media.id);
+    await this._repository.setVariantMedia(org.id, variantId, media.id);
     return media;
   }
 

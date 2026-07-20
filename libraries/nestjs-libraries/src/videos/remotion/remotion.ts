@@ -3,7 +3,7 @@ import {
   Video,
   VideoAbstract,
 } from '@gitroom/nestjs-libraries/videos/video.interface';
-import { IsString } from 'class-validator';
+import { IsObject, IsOptional, IsString } from 'class-validator';
 
 /**
  * Remotion(브랜드 숏폼) video provider.
@@ -13,11 +13,35 @@ import { IsString } from 'class-validator';
  * env: REMOTION_RENDER_URL (예: http://render:7788 / http://localhost:7788)
  */
 class RemotionParams {
+  // v1 (레거시 .mjs 변형): 브랜드 슬러그 + registry variant id
+  @IsOptional()
   @IsString()
-  project: string; // 브랜드 슬러그 (noti · ai-tierlist · moneyorphony ...)
+  project?: string;
 
+  @IsOptional()
   @IsString()
-  id: string; // 변형 id (브랜드 registry ALL 의 variant.id)
+  id?: string;
+
+  // v2 (DB 작성 변형): 브랜드 토큰/폰트 + 포맷 + spec 을 렌더타임 props 로
+  @IsOptional()
+  @IsObject()
+  brand?: {
+    tokens: Record<string, string>;
+    fonts: { family: string; faces?: unknown[] };
+    mascotPrefix?: string | null;
+  };
+
+  @IsOptional()
+  @IsString()
+  format?: string;
+
+  @IsOptional()
+  @IsObject()
+  spec?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  caption?: string;
 }
 
 @Video({
@@ -45,7 +69,8 @@ export class Remotion extends VideoAbstract<RemotionParams> {
     const res = await fetch(`${base}/render`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: customParams.project, id: customParams.id }),
+      // render-server 가 { brand|format } 이면 v2, 아니면 v1({project,id}) 로 분기하므로 그대로 전달.
+      body: JSON.stringify(customParams),
     });
     const data = (await res.json()) as { ok: boolean; url?: string; error?: string };
     if (!data.ok || !data.url) {

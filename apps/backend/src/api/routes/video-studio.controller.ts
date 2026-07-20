@@ -110,7 +110,7 @@ export class VideoStudioController {
     @GetOrgFromRequest() org: Organization,
     @Param('id') id: string
   ) {
-    return this._marketingStudioService.render(org.id, id);
+    return this._marketingStudioService.render(org, id);
   }
 
   @Post('/variants/:id/schedule')
