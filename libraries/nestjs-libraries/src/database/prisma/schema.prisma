@@ -28,6 +28,8 @@ model Organization {
   github              GitHub[]
   Integration         Integration[]
   media               Media[]
+  marketingBrands     MarketingBrand[]
+  marketingVariants   MarketingVariant[]
   buyerOrganization   MessagesGroup[]
   notifications       Notifications[]
   plugs               Plugs[]
@@ -228,6 +230,51 @@ model Media {
   @@index([name])
   @@index([organizationId])
   @@index([type])
+}
+
+// 브랜드 = noti-marketing 의 brand.mjs 를 org 스코프 DB row 로
+model MarketingBrand {
+  id             String   @id @default(uuid())
+  organizationId String
+  slug           String   // noti · ai-tierlist · moneyorphony ...
+  name           String
+  url            String
+  tokens         String   // JSON: { PAPER, INK, ACCENT, ... } (14 토큰)
+  fonts          String   @default("{\"family\":\"Inter\",\"faces\":[]}") // JSON
+  mascotPrefix   String?
+  pillars        String   @default("[]") // JSON string[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  variants       MarketingVariant[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+}
+
+// 변형 = 숏폼 1편 (variants/*.mjs 를 DB row 로)
+model MarketingVariant {
+  id             String   @id @default(uuid())
+  organizationId String
+  brandId        String
+  format         String   // slides | cards | meme | ugc | hookcta
+  status         String   @default("draft") // draft | rendered | scheduled | published
+  hook           String?
+  spec           String   // JSON: 포맷별 필드 (slides[], cards[], topText/bottomText, cta, demoSrc ...)
+  caption        String?
+  hashtags       String   @default("[]") // JSON string[]
+  mediaId        String?  // 렌더 결과 Postiz Media.id
+  postId         String?  // 스케줄된 Post.id
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  brand          MarketingBrand @relation(fields: [brandId], references: [id])
+
+  @@index([organizationId])
+  @@index([brandId])
+  @@index([status])
 }
 
 model SocialMediaAgency {
