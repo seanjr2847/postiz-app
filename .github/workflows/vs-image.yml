@@ -18,3 +18,5 @@ jobs:
           file: Dockerfile.dev
           push: true
           tags: ghcr.io/seanjr2847/postiz-app:vs-2.11.3
+
+# rebuild trigger: v2.11.3-compat fix applied
