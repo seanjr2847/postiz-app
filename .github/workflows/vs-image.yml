@@ -19,4 +19,4 @@ jobs:
           push: true
           tags: ghcr.io/seanjr2847/postiz-app:vs-2.11.3
 
-# rebuild trigger: v2.11.3-compat fix applied
+# rebuild trigger: video-studio publish (Send to Composer) 반영
