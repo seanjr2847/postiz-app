@@ -115,4 +115,33 @@ export class VideoStudioController {
 
   // 게시는 프론트가 렌더된 Media 를 기존 컴포저(AddEditModal)에 프리로드해 처리 —
   // 채널 선택·프로바이더별 설정·검증을 전부 재사용한다. (별도 schedule 엔드포인트 없음)
+
+  // ---- CLI 파이프라인 이식 ----
+
+  // 양산: 렌더 서비스 레지스트리(정적+생성엔진) 전체를 없는 것만 임포트
+  @Post('/brands/:id/import-registry')
+  importRegistry(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._marketingStudioService.importRegistry(org.id, id);
+  }
+
+  // 도구 프록시: scrape | stitch | render-cta | mascot
+  @Post('/tools/:tool')
+  runTool(
+    @Param('tool') tool: string,
+    @Body() body: Record<string, any>
+  ) {
+    return this._marketingStudioService.runTool(tool, body);
+  }
+
+  // 스티치 결과 mp4 를 Postiz Media 로 가져오기
+  @Post('/tools/stitch/import')
+  importStitched(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: { urls: string[] }
+  ) {
+    return this._marketingStudioService.importStitched(org.id, body.urls);
+  }
 }

@@ -145,18 +145,26 @@ const STATUS_DOT: Record<VariantStatus, string> = {
 const VariantRow: FC<{
   variant: Variant;
   selected: boolean;
+  checked: boolean;
+  onCheck: () => void;
   onEdit: () => void;
   onRender: () => void;
   onSend: () => void;
-}> = ({ variant, selected, onEdit, onRender, onSend }) => {
+}> = ({ variant, selected, checked, onCheck, onEdit, onRender, onSend }) => {
   return (
     <div
       className={`flex items-center gap-[10px] px-[12px] py-[10px] border-b border-newTableBorder text-[14px] ${
         selected ? 'bg-newBgColorInner' : ''
       }`}
     >
-      <div className="flex-1 truncate font-mono text-textColor">
-        {variant.id}
+      <input
+        type="checkbox"
+        className="shrink-0 cursor-pointer"
+        checked={checked}
+        onChange={onCheck}
+      />
+      <div className="flex-1 truncate text-textColor">
+        {variant.hook || <span className="font-mono">{variant.id}</span>}
       </div>
       <div className="w-[90px] text-textColor">{variant.format}</div>
       <div className="w-[110px] flex items-center gap-[6px]">
@@ -209,6 +217,8 @@ export const VideoStudioComponent: FC = () => {
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
     null
   );
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const activeBrandId = useMemo(() => {
     if (selectedBrandId) return selectedBrandId;
@@ -333,6 +343,50 @@ export const VideoStudioComponent: FC = () => {
     [fetch, mutateVariants, toaster]
   );
 
+  // 양산 임포트 — 렌더 서비스 레지스트리(정적+생성엔진 전체)에서 없는 것만 추가
+  const importRegistry = useCallback(async () => {
+    if (!activeBrandId) return;
+    toaster.show('레지스트리에서 가져오는 중…');
+    const res = await fetch(
+      `/video-studio/brands/${activeBrandId}/import-registry`,
+      { method: 'POST' }
+    );
+    if (!res.ok) {
+      let message = '임포트 실패';
+      try {
+        message = (await res.json())?.message ?? message;
+      } catch {}
+      toaster.show(String(message), 'warning');
+      return;
+    }
+    const { imported, skipped } = await res.json();
+    await mutateVariants();
+    toaster.show(`양산 임포트: ${imported}개 추가, ${skipped}개는 이미 있음`, 'success');
+  }, [fetch, activeBrandId, mutateVariants, toaster]);
+
+  // 일괄 렌더 — 체크된 변형을 순차 렌더 (렌더 서비스가 1건씩 처리하므로 직렬)
+  const bulkRender = useCallback(async () => {
+    const ids = [...checkedIds];
+    if (!ids.length || bulkBusy) return;
+    setBulkBusy(true);
+    let done = 0;
+    let failed = 0;
+    for (const id of ids) {
+      toaster.show(`일괄 렌더 ${done + failed + 1}/${ids.length}…`);
+      const res = await fetch(`/video-studio/variants/${id}/render`, {
+        method: 'POST',
+      });
+      res.ok ? done++ : failed++;
+      await mutateVariants();
+    }
+    setBulkBusy(false);
+    setCheckedIds(new Set());
+    toaster.show(
+      `일괄 렌더 끝: 성공 ${done}${failed ? `, 실패 ${failed}` : ''}`,
+      failed ? 'warning' : 'success'
+    );
+  }, [checkedIds, bulkBusy, fetch, mutateVariants, toaster]);
+
   // 렌더된 Media + 캡션을 기존 컴포저(AddEditModal)에 프리로드해서 연다 —
   // 채널 선택·시간·프로바이더별 설정은 전부 컴포저 UX 를 재사용 (standalone.modal 패턴).
   const sendToComposer = useCallback(
@@ -421,6 +475,9 @@ export const VideoStudioComponent: FC = () => {
           )}
         </select>
         <Button onClick={createBrand}>+ 새 브랜드</Button>
+        <Button secondary onClick={importRegistry} disabled={!activeBrandId}>
+          양산 임포트 (레지스트리)
+        </Button>
       </div>
 
       {/* Brand editor */}
@@ -438,12 +495,36 @@ export const VideoStudioComponent: FC = () => {
           <span className="text-textColor font-[600]">
             변형{activeBrand ? ` (${activeBrand.slug})` : ''}
           </span>
-          <Button onClick={createVariant} disabled={!activeBrandId}>
-            + 새 변형
-          </Button>
+          <div className="flex items-center gap-[8px]">
+            <Button
+              secondary
+              onClick={bulkRender}
+              disabled={!checkedIds.size || bulkBusy}
+            >
+              {bulkBusy ? '일괄 렌더 중…' : `선택 렌더 (${checkedIds.size})`}
+            </Button>
+            <Button onClick={createVariant} disabled={!activeBrandId}>
+              + 새 변형
+            </Button>
+          </div>
         </div>
         <div className="flex items-center gap-[10px] px-[12px] py-[8px] text-[12px] text-newTextColor/60 border-b border-newTableBorder">
-          <div className="flex-1">id</div>
+          <input
+            type="checkbox"
+            className="shrink-0 cursor-pointer"
+            checked={
+              (variants ?? []).length > 0 &&
+              checkedIds.size === (variants ?? []).length
+            }
+            onChange={() =>
+              setCheckedIds((prev) =>
+                prev.size === (variants ?? []).length
+                  ? new Set()
+                  : new Set((variants ?? []).map((v) => v.id))
+              )
+            }
+          />
+          <div className="flex-1">훅 / id</div>
           <div className="w-[90px]">포맷</div>
           <div className="w-[110px]">상태</div>
           <div className="w-[220px]">동작</div>
@@ -453,6 +534,14 @@ export const VideoStudioComponent: FC = () => {
             key={v.id}
             variant={v}
             selected={v.id === selectedVariantId}
+            checked={checkedIds.has(v.id)}
+            onCheck={() =>
+              setCheckedIds((prev) => {
+                const next = new Set(prev);
+                next.has(v.id) ? next.delete(v.id) : next.add(v.id);
+                return next;
+              })
+            }
             onEdit={() => setSelectedVariantId(v.id)}
             onRender={() => renderVariant(v.id)}
             onSend={() => sendToComposer(v)}
@@ -474,6 +563,195 @@ export const VideoStudioComponent: FC = () => {
           onRender={() => renderVariant(activeVariant.id)}
           onSendToComposer={() => sendToComposer(activeVariant)}
         />
+      )}
+
+      {/* CLI 도구 (렌더 서비스가 실행) */}
+      <ToolsPanel />
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// CLI 도구 패널 — noti-marketing 스크립트를 렌더 서비스 프록시로 실행.
+// 스크랩(yt-dlp) → CTA 렌더 → 스티치(ffmpeg) → Media 임포트 / 마스코트(fal) 생성.
+// ---------------------------------------------------------------------------
+const ToolsPanel: FC = () => {
+  const fetch = useFetch();
+  const toaster = useToaster();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [scrapeUrl, setScrapeUrl] = useState('');
+  const [scrapeCount, setScrapeCount] = useState('5');
+  const [hookSeconds, setHookSeconds] = useState('3');
+  const [mascotRef, setMascotRef] = useState('');
+  const [mascotPose, setMascotPose] = useState('');
+  const [log, setLog] = useState('');
+
+  const run = useCallback(
+    async (tool: string, body: Record<string, any>, label: string) => {
+      if (busy) return null;
+      setBusy(tool);
+      setLog('');
+      toaster.show(`${label} 실행 중… (몇 분 걸릴 수 있음)`);
+      try {
+        const res = await fetch(`/video-studio/tools/${tool}`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        setLog(
+          [data.stdout, data.stderr].filter(Boolean).join('\n').slice(-2000)
+        );
+        if (!res.ok || !data.ok) {
+          toaster.show(`${label} 실패 — 로그 확인`, 'warning');
+          return null;
+        }
+        toaster.show(`${label} 완료`, 'success');
+        return data;
+      } finally {
+        setBusy(null);
+      }
+    },
+    [busy, fetch, toaster]
+  );
+
+  const inputCls =
+    'bg-newBgColor border border-newTableBorder rounded-[6px] px-[10px] h-[36px] text-textColor';
+
+  return (
+    <div className="border border-newTableBorder rounded-[8px] p-[16px] flex flex-col gap-[12px]">
+      <button
+        type="button"
+        className="text-forth text-left hover:underline font-[600]"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? '▾' : '▸'} 도구 — 스크랩 · CTA · 스티치 · 마스코트 (렌더 서비스 실행)
+      </button>
+      {open && (
+        <div className="flex flex-col gap-[14px]">
+          {/* 스크랩 */}
+          <div className="flex items-center gap-[8px] flex-wrap">
+            <span className="text-textColor w-[110px]">① 훅 스크랩</span>
+            <input
+              className={inputCls + ' flex-1 min-w-[260px]'}
+              placeholder="유튜브 채널 Shorts URL (https://youtube.com/@x/shorts)"
+              value={scrapeUrl}
+              onChange={(e) => setScrapeUrl(e.target.value)}
+            />
+            <input
+              className={inputCls + ' w-[70px]'}
+              value={scrapeCount}
+              onChange={(e) => setScrapeCount(e.target.value)}
+              title="개수"
+            />
+            <Button
+              secondary
+              disabled={!scrapeUrl || !!busy}
+              onClick={async () => {
+                const d = await run(
+                  'scrape',
+                  { url: scrapeUrl, count: Number(scrapeCount) || 5 },
+                  '훅 스크랩'
+                );
+                if (d?.manifest?.length) {
+                  toaster.show(`클립 ${d.manifest.length}개 확보`, 'success');
+                }
+              }}
+            >
+              스크랩
+            </Button>
+          </div>
+
+          {/* CTA 렌더 */}
+          <div className="flex items-center gap-[8px] flex-wrap">
+            <span className="text-textColor w-[110px]">② CTA 렌더</span>
+            <span className="text-[12px] text-newTextColor/60 flex-1">
+              스티치가 라운드로빈으로 붙일 CTA 클립(3종) 생성
+            </span>
+            <Button
+              secondary
+              disabled={!!busy}
+              onClick={() => run('render-cta', {}, 'CTA 렌더')}
+            >
+              CTA 렌더
+            </Button>
+          </div>
+
+          {/* 스티치 */}
+          <div className="flex items-center gap-[8px] flex-wrap">
+            <span className="text-textColor w-[110px]">③ 스티치</span>
+            <span className="text-[12px] text-newTextColor/60">훅 앞</span>
+            <input
+              className={inputCls + ' w-[60px]'}
+              value={hookSeconds}
+              onChange={(e) => setHookSeconds(e.target.value)}
+            />
+            <span className="text-[12px] text-newTextColor/60 flex-1">
+              초 + CTA 합성 → 완성본은 미디어 라이브러리로 임포트
+            </span>
+            <Button
+              secondary
+              disabled={!!busy}
+              onClick={async () => {
+                const d = await run(
+                  'stitch',
+                  { hookSeconds: Number(hookSeconds) || 3 },
+                  '스티치'
+                );
+                if (d?.files?.length) {
+                  const res = await fetch('/video-studio/tools/stitch/import', {
+                    method: 'POST',
+                    body: JSON.stringify({ urls: d.files }),
+                  });
+                  if (res.ok) {
+                    toaster.show(
+                      `완성본 ${d.files.length}개를 미디어로 가져옴`,
+                      'success'
+                    );
+                  }
+                }
+              }}
+            >
+              스티치 + 임포트
+            </Button>
+          </div>
+
+          {/* 마스코트 */}
+          <div className="flex items-center gap-[8px] flex-wrap">
+            <span className="text-textColor w-[110px]">④ 마스코트</span>
+            <input
+              className={inputCls + ' flex-1 min-w-[220px]'}
+              placeholder="레퍼런스 이미지 URL (fal 업로드)"
+              value={mascotRef}
+              onChange={(e) => setMascotRef(e.target.value)}
+            />
+            <input
+              className={inputCls + ' w-[120px]'}
+              placeholder="포즈 (선택)"
+              value={mascotPose}
+              onChange={(e) => setMascotPose(e.target.value)}
+            />
+            <Button
+              secondary
+              disabled={!mascotRef || !!busy}
+              onClick={() =>
+                run(
+                  'mascot',
+                  { refUrl: mascotRef, ...(mascotPose ? { pose: mascotPose } : {}) },
+                  '마스코트 생성'
+                )
+              }
+            >
+              포즈 생성
+            </Button>
+          </div>
+
+          {log && (
+            <pre className="text-[11px] text-newTextColor/70 bg-newBgColor border border-newTableBorder rounded-[6px] p-[10px] max-h-[220px] overflow-auto whitespace-pre-wrap">
+              {log}
+            </pre>
+          )}
+        </div>
       )}
     </div>
   );

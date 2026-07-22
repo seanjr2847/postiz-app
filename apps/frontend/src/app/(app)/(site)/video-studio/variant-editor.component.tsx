@@ -218,10 +218,18 @@ export const VariantEditor: FC<{
       </div>
 
       {variant.mediaId && (
-        <div className="text-[12px] text-newTextColor/60">
-          렌더된 mediaId: <span className="font-mono">{variant.mediaId}</span>
-          {/* TODO(preview): show thumbnail from the rendered Media once the
-              render contract returns a url (contract §3 "완료 시 썸네일"). */}
+        <div className="flex flex-col gap-[8px]">
+          <div className="text-[12px] text-newTextColor/60">
+            렌더된 mediaId: <span className="font-mono">{variant.mediaId}</span>
+          </div>
+          {variant.media?.path && (
+            <video
+              controls
+              preload="metadata"
+              className="w-[220px] rounded-[8px] border border-newTableBorder"
+              src={variant.media.path}
+            />
+          )}
         </div>
       )}
     </div>
