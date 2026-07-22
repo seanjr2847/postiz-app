@@ -229,18 +229,22 @@ export const VideoStudioComponent: FC = () => {
 
   // --- brand actions ---
   const createBrand = useCallback(async () => {
+    // DTO 는 tokens/fonts/pillars 를 객체로 검증한다 — stringify 는 백엔드 repository 몫.
     const res = await fetch('/video-studio/brands', {
       method: 'POST',
       body: JSON.stringify({
         slug: 'new-brand',
         name: 'New Brand',
         url: 'https://example.com',
-        tokens: JSON.stringify(PRESETS.light),
-        fonts: JSON.stringify({ family: 'Inter', faces: [] }),
-        mascotPrefix: null,
-        pillars: JSON.stringify([]),
+        tokens: PRESETS.light,
+        fonts: { family: 'Inter', faces: [] },
+        pillars: [],
       }),
     });
+    if (!res.ok) {
+      toaster.show('Brand create failed — check the fields', 'warning');
+      return;
+    }
     const created: Brand = await res.json();
     await mutateBrands();
     if (created?.id) {
@@ -250,12 +254,16 @@ export const VideoStudioComponent: FC = () => {
   }, [fetch, mutateBrands, toaster]);
 
   const saveBrand = useCallback(
-    async (payload: Partial<Brand>) => {
+    async (payload: Record<string, any>) => {
       if (!activeBrandId) return;
-      await fetch(`/video-studio/brands/${activeBrandId}`, {
+      const res = await fetch(`/video-studio/brands/${activeBrandId}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
+      if (!res.ok) {
+        toaster.show('Brand save failed — check the fields', 'warning');
+        return;
+      }
       await mutateBrands();
       toaster.show('Brand saved', 'success');
     },
@@ -272,25 +280,33 @@ export const VideoStudioComponent: FC = () => {
         format: 'slides',
         status: 'draft',
         hook: '',
-        spec: JSON.stringify({ slides: [''], cta: '' }),
+        spec: { slides: [''], cta: '' },
         caption: '',
-        hashtags: JSON.stringify([]),
+        hashtags: [],
       }),
     });
+    if (!res.ok) {
+      toaster.show('Variant create failed — check the fields', 'warning');
+      return;
+    }
     const created: Variant = await res.json();
     await mutateVariants();
     if (created?.id) {
       setSelectedVariantId(created.id);
     }
-  }, [fetch, activeBrandId, mutateVariants]);
+  }, [fetch, activeBrandId, mutateVariants, toaster]);
 
   const saveVariant = useCallback(
-    async (payload: Partial<Variant>) => {
+    async (payload: Record<string, any>) => {
       if (!selectedVariantId) return;
-      await fetch(`/video-studio/variants/${selectedVariantId}`, {
+      const res = await fetch(`/video-studio/variants/${selectedVariantId}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
+      if (!res.ok) {
+        toaster.show('Variant save failed — check the fields', 'warning');
+        return;
+      }
       await mutateVariants();
       toaster.show('Variant saved', 'success');
     },
@@ -300,11 +316,19 @@ export const VideoStudioComponent: FC = () => {
   const renderVariant = useCallback(
     async (variantId: string) => {
       toaster.show('Render started…');
-      await fetch(`/video-studio/variants/${variantId}/render`, {
+      const res = await fetch(`/video-studio/variants/${variantId}/render`, {
         method: 'POST',
       });
+      if (!res.ok) {
+        let message = 'Render failed';
+        try {
+          message = (await res.json())?.message ?? message;
+        } catch {}
+        toaster.show(String(message), 'warning');
+        return;
+      }
       await mutateVariants();
-      toaster.show('Render requested', 'success');
+      toaster.show('Render done — media attached', 'success');
     },
     [fetch, mutateVariants, toaster]
   );

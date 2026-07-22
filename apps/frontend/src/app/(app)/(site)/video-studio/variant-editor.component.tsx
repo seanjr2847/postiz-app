@@ -49,7 +49,8 @@ const Field: FC<{
 
 export const VariantEditor: FC<{
   variant: Variant;
-  onSave: (payload: Partial<Variant>) => void;
+  // DTO(UpdateVariantDto)는 spec 객체·hashtags 배열을 받는다(stringify 는 백엔드 몫).
+  onSave: (payload: Record<string, any>) => void;
   onRender: () => void;
   onSendToComposer: () => void;
 }> = ({ variant, onSave, onRender, onSendToComposer }) => {
@@ -77,8 +78,8 @@ export const VariantEditor: FC<{
       format,
       hook: hook || null,
       caption: caption || null,
-      hashtags: JSON.stringify(hashtags.filter((h) => h.trim())),
-      spec: JSON.stringify(spec),
+      hashtags: hashtags.filter((h) => h.trim()),
+      spec,
     });
   }, [format, hook, caption, hashtags, spec, onSave]);
 

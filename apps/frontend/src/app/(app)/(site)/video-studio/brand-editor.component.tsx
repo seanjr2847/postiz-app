@@ -20,7 +20,9 @@ const inputClass =
 
 export const BrandEditor: FC<{
   brand: Brand;
-  onSave: (payload: Partial<Brand>) => void;
+  // DTO(CreateBrandDto/UpdateBrandDto)는 tokens/fonts/pillars 를 객체로 받는다
+  // (stringify 는 백엔드 repository 몫) — payload 는 Brand 컬럼형(string)과 다르다.
+  onSave: (payload: Record<string, any>) => void;
 }> = ({ brand, onSave }) => {
   const [name, setName] = useState(brand.name);
   const [slug, setSlug] = useState(brand.slug);
@@ -55,9 +57,9 @@ export const BrandEditor: FC<{
       slug,
       url,
       mascotPrefix: mascotPrefix || null,
-      tokens: JSON.stringify(tokens),
-      pillars: JSON.stringify(pillars.filter((p) => p.trim())),
-      fonts: JSON.stringify(fonts),
+      tokens,
+      pillars: pillars.filter((p) => p.trim()),
+      fonts,
     });
   }, [name, slug, url, mascotPrefix, tokens, pillars, fonts, onSave]);
 
