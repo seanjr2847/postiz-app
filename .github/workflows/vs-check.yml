@@ -1,7 +1,7 @@
 name: VS Check
 on:
   push:
-    branches: [vs-2.11.3]
+    branches: [vs-2.11.3, video-studio-publish]
 jobs:
   build:
     runs-on: ubuntu-latest

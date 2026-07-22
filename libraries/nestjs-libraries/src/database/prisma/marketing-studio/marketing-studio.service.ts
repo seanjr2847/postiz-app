@@ -2,20 +2,17 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { Organization } from '@prisma/client';
 import { MarketingStudioRepository } from '@gitroom/nestjs-libraries/database/prisma/marketing-studio/marketing-studio.repository';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
-import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { CreateBrandDto } from '@gitroom/nestjs-libraries/dtos/video-studio/create.brand.dto';
 import { UpdateBrandDto } from '@gitroom/nestjs-libraries/dtos/video-studio/update.brand.dto';
 import { CreateVariantDto } from '@gitroom/nestjs-libraries/dtos/video-studio/create.variant.dto';
 import { UpdateVariantDto } from '@gitroom/nestjs-libraries/dtos/video-studio/update.variant.dto';
 import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
-import { CreatePostDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
 
 @Injectable()
 export class MarketingStudioService {
   constructor(
     private _repository: MarketingStudioRepository,
-    private _mediaService: MediaService,
-    private _postsService: PostsService
+    private _mediaService: MediaService
   ) {}
 
   // ---- Brands ----
@@ -105,42 +102,4 @@ export class MarketingStudioService {
     return media;
   }
 
-  /**
-   * Schedule a rendered variant by creating a Postiz post (same path as the public API),
-   * then link the produced Post onto the variant.
-   */
-  async schedule(orgId: string, variantId: string) {
-    const variant = await this._repository.getVariant(orgId, variantId);
-    if (!variant) {
-      throw new BadRequestException('Variant not found');
-    }
-
-    if (!variant.mediaId) {
-      throw new BadRequestException(
-        'Variant must be rendered before it can be scheduled'
-      );
-    }
-
-    // TODO(running-app): build the full CreatePostDto from the variant — resolve target
-    // integration id(s), publish date/type (draft|schedule|now), attach the rendered Media
-    // (variant.mediaId) as the post image, and use variant.caption + variant.hashtags for
-    // the content. This mirrors the public POST /posts payload shape (see CreatePostDto).
-    const dto = {
-      type: 'schedule',
-      date: new Date().toISOString(),
-      shortLink: false,
-      tags: [],
-      posts: [],
-    } as unknown as CreatePostDto;
-
-    // v2.11.3 의 createPost 는 (orgId, dto) 2인자. (schedule 은 아직 stub — CreatePostDto 매핑 TODO)
-    const result = await this._postsService.createPost(orgId, dto);
-
-    const postId = result?.[0]?.postId;
-    if (postId) {
-      await this._repository.setVariantPost(orgId, variantId, postId);
-    }
-
-    return result;
-  }
 }

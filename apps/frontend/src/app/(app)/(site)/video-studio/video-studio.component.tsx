@@ -2,9 +2,12 @@
 
 import { FC, useCallback, useMemo, useState } from 'react';
 import useSWR from 'swr';
+import dayjs from 'dayjs';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { Button } from '@gitroom/react/form/button';
+import { useModals } from '@gitroom/frontend/components/layout/new-modal';
+import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
 import { BrandEditor } from './brand-editor.component';
 import { VariantEditor } from './variant-editor.component';
 
@@ -37,6 +40,7 @@ export interface Variant {
   hashtags: string; // JSON: string[]
   mediaId?: string | null;
   postId?: string | null;
+  media?: { id: string; path: string } | null; // 백엔드가 mediaId 로 수동 조인
 }
 
 // The 14 brand tokens (order = editor layout). Names shared across all brands.
@@ -196,6 +200,7 @@ const VariantRow: FC<{
 export const VideoStudioComponent: FC = () => {
   const fetch = useFetch();
   const toaster = useToaster();
+  const modal = useModals();
 
   const { data: brands, mutate: mutateBrands, isLoading: brandsLoading } =
     useBrands();
@@ -304,21 +309,69 @@ export const VideoStudioComponent: FC = () => {
     [fetch, mutateVariants, toaster]
   );
 
+  // 렌더된 Media + 캡션을 기존 컴포저(AddEditModal)에 프리로드해서 연다 —
+  // 채널 선택·시간·프로바이더별 설정은 전부 컴포저 UX 를 재사용 (standalone.modal 패턴).
   const sendToComposer = useCallback(
-    (variant: Variant) => {
-      // TODO(composer-wiring): hand variant.mediaId to the Postiz composer /
-      // calendar so channel + time are picked there. Options to wire up:
-      //   (a) push to useLaunchStore() with the rendered Media pre-attached, or
-      //   (b) POST /video-studio/variants/:id/schedule (createPost) then open
-      //       the calendar. See contract video-studio-design.md §2/§3.
-      toaster.show(
-        'Send to Composer is not wired yet (mediaId=' +
-          (variant.mediaId ?? 'none') +
-          ')',
-        'warning'
-      );
+    async (variant: Variant) => {
+      if (!variant.media?.path) {
+        toaster.show('Render first — no media on this variant', 'warning');
+        return;
+      }
+
+      const [integrations, slot] = await Promise.all([
+        (await fetch('/integrations/list')).json(),
+        (await fetch('/posts/find-slot')).json(),
+      ]);
+      if (!integrations?.integrations?.length) {
+        toaster.show('Connect a channel first', 'warning');
+        return;
+      }
+
+      let hashtags: string[] = [];
+      try {
+        hashtags = JSON.parse(variant.hashtags || '[]');
+      } catch {}
+      const content = [variant.caption, hashtags.join(' ')]
+        .filter(Boolean)
+        .join('\n\n');
+
+      modal.openModal({
+        id: 'add-edit-modal',
+        closeOnClickOutside: false,
+        removeLayout: true,
+        closeOnEscape: false,
+        withCloseButton: false,
+        askClose: true,
+        fullScreen: true,
+        classNames: {
+          modal: 'w-[100%] max-w-[1400px] text-textColor',
+        },
+        children: (
+          <AddEditModal
+            allIntegrations={integrations.integrations}
+            integrations={integrations.integrations}
+            onlyValues={[
+              {
+                content,
+                image: [{ id: variant.media.id, path: variant.media.path }],
+              },
+            ]}
+            date={dayjs.utc(slot.date).local()}
+            reopenModal={() => ({})}
+            mutate={async () => {
+              // 컴포저 저장 성공 후: 변형 상태를 scheduled 로 반영
+              await fetch(`/video-studio/variants/${variant.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ status: 'scheduled' }),
+              });
+              await mutateVariants();
+            }}
+          />
+        ),
+        size: '80%',
+      });
     },
-    [toaster]
+    [fetch, modal, mutateVariants, toaster]
   );
 
   return (

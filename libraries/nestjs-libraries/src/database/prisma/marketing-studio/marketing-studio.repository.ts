@@ -9,8 +9,32 @@ import { UpdateVariantDto } from '@gitroom/nestjs-libraries/dtos/video-studio/up
 export class MarketingStudioRepository {
   constructor(
     private _brand: PrismaRepository<'marketingBrand'>,
-    private _variant: PrismaRepository<'marketingVariant'>
+    private _variant: PrismaRepository<'marketingVariant'>,
+    private _media: PrismaRepository<'media'>
   ) {}
+
+  // MarketingVariant.mediaId 는 FK 없는 느슨한 참조(스키마 변경 회피) — 렌더된
+  // Media 의 path 를 프론트(컴포저 프리로드)가 쓰도록 여기서 수동 조인한다.
+  private async attachMedia<
+    T extends { mediaId: string | null } | null
+  >(variants: T[]): Promise<T[]> {
+    const ids = [
+      ...new Set(
+        variants.flatMap((v) => (v?.mediaId ? [v.mediaId] : []))
+      ),
+    ];
+    if (!ids.length) {
+      return variants.map((v) => (v ? { ...v, media: null } : v));
+    }
+    const media = await this._media.model.media.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, path: true },
+    });
+    const byId = new Map(media.map((m) => [m.id, m]));
+    return variants.map((v) =>
+      v ? { ...v, media: v.mediaId ? byId.get(v.mediaId) ?? null : null } : v
+    );
+  }
 
   // ---- Brands ----
 
@@ -91,8 +115,8 @@ export class MarketingStudioRepository {
 
   // ---- Variants ----
 
-  getVariants(orgId: string, brandId?: string) {
-    return this._variant.model.marketingVariant.findMany({
+  async getVariants(orgId: string, brandId?: string) {
+    const variants = await this._variant.model.marketingVariant.findMany({
       where: {
         organizationId: orgId,
         deletedAt: null,
@@ -102,16 +126,18 @@ export class MarketingStudioRepository {
         createdAt: 'desc',
       },
     });
+    return this.attachMedia(variants);
   }
 
-  getVariant(orgId: string, id: string) {
-    return this._variant.model.marketingVariant.findFirst({
+  async getVariant(orgId: string, id: string) {
+    const variant = await this._variant.model.marketingVariant.findFirst({
       where: {
         id,
         organizationId: orgId,
         deletedAt: null,
       },
     });
+    return (await this.attachMedia([variant]))[0];
   }
 
   createVariant(orgId: string, body: CreateVariantDto) {
@@ -170,20 +196,6 @@ export class MarketingStudioRepository {
       data: {
         mediaId,
         status: 'rendered',
-      },
-    });
-  }
-
-  // Result of a schedule: link the produced Postiz Post and flip status.
-  setVariantPost(orgId: string, id: string, postId: string) {
-    return this._variant.model.marketingVariant.update({
-      where: {
-        id,
-        organizationId: orgId,
-      },
-      data: {
-        postId,
-        status: 'scheduled',
       },
     });
   }
