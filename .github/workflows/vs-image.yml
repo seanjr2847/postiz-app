@@ -19,4 +19,4 @@ jobs:
           push: true
           tags: ghcr.io/seanjr2847/postiz-app:vs-2.11.3
 
-# rebuild trigger: CRUD 400 fix (객체 페이로드) 반영
+# rebuild trigger: UI 한국어화 반영
