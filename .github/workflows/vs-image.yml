@@ -19,4 +19,4 @@ jobs:
           push: true
           tags: ghcr.io/seanjr2847/postiz-app:vs-2.11.3
 
-# rebuild trigger: 셀프호스트 렌더 차단 해제
+# rebuild trigger: zombie 워치독 추가
