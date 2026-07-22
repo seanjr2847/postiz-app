@@ -5,6 +5,10 @@ import { Button } from '@gitroom/react/form/button';
 import type { Variant, VariantFormat } from './video-studio.component';
 import { FORMATS } from './video-studio.component';
 
+// cta 는 렌더 계약(v2)상 { text } 객체 — 편집기는 text 만 다루고 저장 시 객체로 감싼다.
+const ctaText = (c: any): string =>
+  typeof c === 'string' ? c : c?.text ?? '';
+
 const safeParse = <T,>(value: string | null | undefined, fallback: T): T => {
   if (!value) return fallback;
   try {
@@ -16,11 +20,11 @@ const safeParse = <T,>(value: string | null | undefined, fallback: T): T => {
 
 // Default spec shape per format (contract §3 "포맷별 폼").
 const DEFAULT_SPEC: Record<VariantFormat, Record<string, any>> = {
-  slides: { slides: [''], cta: '' },
-  meme: { topText: '', bottomText: '', image: '', cta: '' },
-  cards: { cards: [{ image: '', text: '' }], demoSrc: '', cta: '' },
-  ugc: { demoSrc: '', reactionSrc: '', cta: '' },
-  hookcta: { demoSrc: '', hookClipSrc: '', cta: '' },
+  slides: { slides: [''], cta: { text: '' } },
+  meme: { topText: '', bottomText: '', image: '', cta: { text: '' } },
+  cards: { cards: [{ image: '', text: '' }], demoSrc: '', cta: { text: '' } },
+  ugc: { demoSrc: '', reactionSrc: '', cta: { text: '' } },
+  hookcta: { demoSrc: '', hookClipSrc: '', cta: { text: '' } },
 };
 
 const labelClass = 'text-[12px] text-newTextColor/60 mb-[4px]';
@@ -138,8 +142,8 @@ export const VariantEditor: FC<{
             />
             <Field
               label="cta"
-              value={spec.cta ?? ''}
-              onChange={(v) => setSpecField('cta', v)}
+              value={ctaText(spec.cta)}
+              onChange={(v) => setSpecField('cta', { text: v })}
             />
           </>
         )}
@@ -172,8 +176,8 @@ export const VariantEditor: FC<{
             )}
             <Field
               label="cta"
-              value={spec.cta ?? ''}
-              onChange={(v) => setSpecField('cta', v)}
+              value={ctaText(spec.cta)}
+              onChange={(v) => setSpecField('cta', { text: v })}
             />
           </>
         )}
@@ -282,8 +286,8 @@ const SlidesForm: FC<{
       </button>
       <Field
         label="cta"
-        value={spec.cta ?? ''}
-        onChange={(v) => setSpecField('cta', v)}
+        value={ctaText(spec.cta)}
+        onChange={(v) => setSpecField('cta', { text: v })}
       />
     </>
   );
@@ -354,8 +358,8 @@ const CardsForm: FC<{
       />
       <Field
         label="cta"
-        value={spec.cta ?? ''}
-        onChange={(v) => setSpecField('cta', v)}
+        value={ctaText(spec.cta)}
+        onChange={(v) => setSpecField('cta', { text: v })}
       />
     </>
   );

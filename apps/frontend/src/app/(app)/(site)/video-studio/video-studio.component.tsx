@@ -2,12 +2,12 @@
 
 import { FC, useCallback, useMemo, useState } from 'react';
 import useSWR from 'swr';
-import dayjs from 'dayjs';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { Button } from '@gitroom/react/form/button';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
+import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
 import { BrandEditor } from './brand-editor.component';
 import { VariantEditor } from './variant-editor.component';
 
@@ -135,67 +135,73 @@ const useVariants = (brandId: string | null) => {
 // ---------------------------------------------------------------------------
 // Small presentational helpers
 // ---------------------------------------------------------------------------
-const STATUS_DOT: Record<VariantStatus, string> = {
-  draft: 'text-gray-400',
-  rendered: 'text-green-500',
-  scheduled: 'text-blue-400',
-  published: 'text-purple-400',
+const STATUS_CHIP: Record<VariantStatus, { label: string; cls: string }> = {
+  draft: { label: '초안', cls: 'text-gray-300 bg-gray-500/20' },
+  rendered: { label: '렌더됨', cls: 'text-green-300 bg-green-500/20' },
+  scheduled: { label: '예약됨', cls: 'text-blue-300 bg-blue-500/20' },
+  published: { label: '게시됨', cls: 'text-purple-300 bg-purple-500/20' },
 };
 
 const VariantRow: FC<{
   variant: Variant;
   selected: boolean;
   checked: boolean;
+  rendering: boolean;
   onCheck: () => void;
   onEdit: () => void;
   onRender: () => void;
   onSend: () => void;
-}> = ({ variant, selected, checked, onCheck, onEdit, onRender, onSend }) => {
+}> = ({ variant, selected, checked, rendering, onCheck, onEdit, onRender, onSend }) => {
+  const chip = STATUS_CHIP[variant.status] ?? {
+    label: variant.status,
+    cls: 'text-gray-300 bg-gray-500/20',
+  };
   return (
     <div
-      className={`flex items-center gap-[10px] px-[12px] py-[10px] border-b border-newTableBorder text-[14px] ${
-        selected ? 'bg-newBgColorInner' : ''
+      className={`flex items-center gap-[10px] px-[12px] py-[10px] border-b border-newTableBorder text-[14px] cursor-pointer hover:bg-newBgColor ${
+        selected ? 'bg-newBgColor border-s-[3px] border-s-forth' : ''
       }`}
+      onClick={onEdit}
     >
       <input
         type="checkbox"
         className="shrink-0 cursor-pointer"
         checked={checked}
         onChange={onCheck}
+        onClick={(e) => e.stopPropagation()}
       />
       <div className="flex-1 truncate text-textColor">
-        {variant.hook || <span className="font-mono">{variant.id}</span>}
+        {variant.hook || (
+          <span className="text-newTextColor/50">(제목 없음)</span>
+        )}
       </div>
-      <div className="w-[90px] text-textColor">{variant.format}</div>
-      <div className="w-[110px] flex items-center gap-[6px]">
-        <span className={STATUS_DOT[variant.status]}>●</span>
-        <span className="text-textColor">{variant.status}</span>
+      <div className="w-[80px] text-newTextColor/70 text-[12px]">
+        {variant.format}
       </div>
-      <div className="flex gap-[8px]">
-        <button
-          type="button"
-          className="text-forth hover:underline"
-          onClick={onEdit}
+      <div className="w-[80px]">
+        <span
+          className={`px-[8px] py-[2px] rounded-full text-[12px] ${chip.cls}`}
         >
-          수정
-        </button>
+          {rendering ? '렌더 중…' : chip.label}
+        </span>
+      </div>
+      <div className="flex gap-[10px]" onClick={(e) => e.stopPropagation()}>
         <button
           type="button"
-          className="text-forth hover:underline"
+          className="text-forth hover:underline disabled:opacity-40"
+          disabled={rendering}
           onClick={onRender}
         >
-          렌더
+          {rendering ? '렌더 중…' : '렌더'}
         </button>
         <button
           type="button"
-          className="text-forth hover:underline disabled:opacity-40 disabled:no-underline"
+          className="text-forth hover:underline disabled:opacity-30 disabled:no-underline"
           disabled={!variant.mediaId}
           onClick={onSend}
-          title={
-            variant.mediaId ? '컴포저로 보내기' : '렌더 먼저 필요'
-          }
+          title={variant.mediaId ? '컴포저로 보내기' : '렌더 먼저 필요'}
         >
-          컴포저로 보내기
+          게시
         </button>
       </div>
     </div>
@@ -219,6 +225,8 @@ export const VideoStudioComponent: FC = () => {
   );
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [renderingIds, setRenderingIds] = useState<Set<string>>(new Set());
+  const [brandOpen, setBrandOpen] = useState(false);
 
   const activeBrandId = useMemo(() => {
     if (selectedBrandId) return selectedBrandId;
@@ -325,20 +333,29 @@ export const VideoStudioComponent: FC = () => {
 
   const renderVariant = useCallback(
     async (variantId: string) => {
-      toaster.show('렌더 시작…');
-      const res = await fetch(`/video-studio/variants/${variantId}/render`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        let message = '렌더 실패';
-        try {
-          message = (await res.json())?.message ?? message;
-        } catch {}
-        toaster.show(String(message), 'warning');
-        return;
+      setRenderingIds((prev) => new Set(prev).add(variantId));
+      toaster.show('렌더 시작 — 1분쯤 걸립니다');
+      try {
+        const res = await fetch(`/video-studio/variants/${variantId}/render`, {
+          method: 'POST',
+        });
+        if (!res.ok) {
+          let message = '렌더 실패';
+          try {
+            message = (await res.json())?.message ?? message;
+          } catch {}
+          toaster.show(String(message), 'warning');
+          return;
+        }
+        await mutateVariants();
+        toaster.show('렌더 완료 — 게시 버튼이 활성화됐습니다', 'success');
+      } finally {
+        setRenderingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(variantId);
+          return next;
+        });
       }
-      await mutateVariants();
-      toaster.show('렌더 완료 — 미디어 연결됨', 'success');
     },
     [fetch, mutateVariants, toaster]
   );
@@ -396,10 +413,9 @@ export const VideoStudioComponent: FC = () => {
         return;
       }
 
-      const [integrations, slot] = await Promise.all([
-        (await fetch('/integrations/list')).json(),
-        (await fetch('/posts/find-slot')).json(),
-      ]);
+      // find-slot 은 이 인스턴스에서 응답이 안 돌아와(행) 컴포저가 영영 안 열리는
+      // 원인이었다 — 시간은 컴포저에서 고르므로 지금+10분으로 충분하다.
+      const integrations = await (await fetch('/integrations/list')).json();
       if (!integrations?.integrations?.length) {
         toaster.show('먼저 채널을 연결하세요', 'warning');
         return;
@@ -434,7 +450,7 @@ export const VideoStudioComponent: FC = () => {
                 image: [{ id: variant.media.id, path: variant.media.path }],
               },
             ]}
-            date={dayjs.utc(slot.date).local()}
+            date={newDayjs().add(10, 'minute')}
             reopenModal={() => ({})}
             mutate={async () => {
               // 컴포저 저장 성공 후: 변형 상태를 scheduled 로 반영
@@ -454,7 +470,7 @@ export const VideoStudioComponent: FC = () => {
 
   return (
     <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col gap-[15px] transition-all">
-      {/* Brand selector row */}
+      {/* Brand selector row — 편집기는 기본 접힘 (자주 안 만짐) */}
       <div className="flex items-center gap-[12px] flex-wrap">
         <span className="text-textColor font-[600]">브랜드</span>
         <select
@@ -474,14 +490,24 @@ export const VideoStudioComponent: FC = () => {
             <option value="">브랜드 없음</option>
           )}
         </select>
-        <Button onClick={createBrand}>+ 새 브랜드</Button>
+        <button
+          type="button"
+          className="text-forth text-[13px] hover:underline"
+          onClick={() => setBrandOpen((o) => !o)}
+        >
+          {brandOpen ? '▾ 브랜드 설정 닫기' : '▸ 브랜드 설정'}
+        </button>
+        <div className="flex-1" />
         <Button secondary onClick={importRegistry} disabled={!activeBrandId}>
-          양산 임포트 (레지스트리)
+          양산 임포트
+        </Button>
+        <Button secondary onClick={createBrand}>
+          + 새 브랜드
         </Button>
       </div>
 
-      {/* Brand editor */}
-      {activeBrand && (
+      {/* Brand editor (접힘 토글) */}
+      {brandOpen && activeBrand && (
         <BrandEditor
           key={activeBrand.id}
           brand={activeBrand}
@@ -489,11 +515,22 @@ export const VideoStudioComponent: FC = () => {
         />
       )}
 
-      {/* Variant list */}
-      <div className="border border-newTableBorder rounded-[8px] overflow-hidden">
+      {/* Variant editor — 목록 위: 행을 클릭하면 바로 여기서 편집 */}
+      {activeVariant && (
+        <VariantEditor
+          key={activeVariant.id}
+          variant={activeVariant}
+          onSave={saveVariant}
+          onRender={() => renderVariant(activeVariant.id)}
+          onSendToComposer={() => sendToComposer(activeVariant)}
+        />
+      )}
+
+      {/* Variant list (내부 스크롤) */}
+      <div className="border border-newTableBorder rounded-[8px] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between px-[12px] py-[10px] bg-newBgColor">
           <span className="text-textColor font-[600]">
-            변형{activeBrand ? ` (${activeBrand.slug})` : ''}
+            변형 {variants?.length ? `(${variants.length})` : ''}
           </span>
           <div className="flex items-center gap-[8px]">
             <Button
@@ -524,46 +561,39 @@ export const VideoStudioComponent: FC = () => {
               )
             }
           />
-          <div className="flex-1">훅 / id</div>
-          <div className="w-[90px]">포맷</div>
-          <div className="w-[110px]">상태</div>
-          <div className="w-[220px]">동작</div>
+          <div className="flex-1">훅 (행 클릭 = 편집)</div>
+          <div className="w-[80px]">포맷</div>
+          <div className="w-[80px]">상태</div>
+          <div className="w-[90px]">동작</div>
         </div>
-        {(variants ?? []).map((v) => (
-          <VariantRow
-            key={v.id}
-            variant={v}
-            selected={v.id === selectedVariantId}
-            checked={checkedIds.has(v.id)}
-            onCheck={() =>
-              setCheckedIds((prev) => {
-                const next = new Set(prev);
-                next.has(v.id) ? next.delete(v.id) : next.add(v.id);
-                return next;
-              })
-            }
-            onEdit={() => setSelectedVariantId(v.id)}
-            onRender={() => renderVariant(v.id)}
-            onSend={() => sendToComposer(v)}
-          />
-        ))}
-        {(variants ?? []).length === 0 && (
-          <div className="px-[12px] py-[16px] text-[13px] text-newTextColor/60">
-            아직 변형이 없습니다.
-          </div>
-        )}
+        <div className="max-h-[420px] overflow-y-auto">
+          {(variants ?? []).map((v) => (
+            <VariantRow
+              key={v.id}
+              variant={v}
+              selected={v.id === selectedVariantId}
+              checked={checkedIds.has(v.id)}
+              rendering={renderingIds.has(v.id)}
+              onCheck={() =>
+                setCheckedIds((prev) => {
+                  const next = new Set(prev);
+                  next.has(v.id) ? next.delete(v.id) : next.add(v.id);
+                  return next;
+                })
+              }
+              onEdit={() => setSelectedVariantId(v.id)}
+              onRender={() => renderVariant(v.id)}
+              onSend={() => sendToComposer(v)}
+            />
+          ))}
+          {(variants ?? []).length === 0 && (
+            <div className="px-[12px] py-[16px] text-[13px] text-newTextColor/60">
+              아직 변형이 없습니다 — 「양산 임포트」로 기존 콘텐츠를 가져오거나 「+ 새
+              변형」으로 시작하세요.
+            </div>
+          )}
+        </div>
       </div>
-
-      {/* Variant editor */}
-      {activeVariant && (
-        <VariantEditor
-          key={activeVariant.id}
-          variant={activeVariant}
-          onSave={saveVariant}
-          onRender={() => renderVariant(activeVariant.id)}
-          onSendToComposer={() => sendToComposer(activeVariant)}
-        />
-      )}
 
       {/* CLI 도구 (렌더 서비스가 실행) */}
       <ToolsPanel />
