@@ -19,4 +19,4 @@ jobs:
           push: true
           tags: ghcr.io/seanjr2847/postiz-app:vs-2.11.3
 
-# rebuild trigger: zombie 워치독 추가
+# rebuild trigger: E2E 버그픽스 + UX 개편
