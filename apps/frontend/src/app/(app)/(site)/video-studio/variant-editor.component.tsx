@@ -87,17 +87,17 @@ export const VariantEditor: FC<{
     <div className="border border-newTableBorder rounded-[8px] p-[16px] flex flex-col gap-[14px]">
       <div className="flex items-center justify-between">
         <span className="text-textColor font-[600]">
-          Variant editor — {variant.id}
+          변형 편집 — {variant.id}
         </span>
         <span className="text-[12px] text-newTextColor/60">
-          status: {variant.status}
+          상태: {variant.status}
         </span>
       </div>
 
       {/* format + hook */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
         <div className="flex flex-col">
-          <label className={labelClass}>format</label>
+          <label className={labelClass}>포맷</label>
           <select
             className={inputClass}
             value={format}
@@ -110,7 +110,7 @@ export const VariantEditor: FC<{
             ))}
           </select>
         </div>
-        <Field label="hook" value={hook} onChange={setHook} />
+        <Field label="훅 (hook)" value={hook} onChange={setHook} />
       </div>
 
       {/* per-format spec fields */}
@@ -156,7 +156,7 @@ export const VariantEditor: FC<{
             />
             {format === 'ugc' && (
               <Field
-                label="reactionSrc (optional)"
+                label="reactionSrc (선택)"
                 mediaHint
                 value={spec.reactionSrc ?? ''}
                 onChange={(v) => setSpecField('reactionSrc', v)}
@@ -164,7 +164,7 @@ export const VariantEditor: FC<{
             )}
             {format === 'hookcta' && (
               <Field
-                label="hookClipSrc (optional)"
+                label="hookClipSrc (선택)"
                 mediaHint
                 value={spec.hookClipSrc ?? ''}
                 onChange={(v) => setSpecField('hookClipSrc', v)}
@@ -182,7 +182,7 @@ export const VariantEditor: FC<{
       {/* caption + hashtags */}
       <div className="flex flex-col gap-[12px] border-t border-newTableBorder pt-[12px]">
         <div className="flex flex-col">
-          <label className={labelClass}>caption</label>
+          <label className={labelClass}>캡션</label>
           <textarea
             className="bg-newBgColor border border-newTableBorder rounded-[6px] px-[10px] py-[8px] text-textColor w-full min-h-[70px]"
             value={caption}
@@ -190,7 +190,7 @@ export const VariantEditor: FC<{
           />
         </div>
         <div className="flex flex-col">
-          <label className={labelClass}>hashtags (space separated)</label>
+          <label className={labelClass}>해시태그 (띄어쓰기 구분)</label>
           <input
             className={inputClass}
             value={hashtags.join(' ')}
@@ -206,20 +206,20 @@ export const VariantEditor: FC<{
       {/* actions */}
       <div className="flex items-center gap-[10px] justify-end border-t border-newTableBorder pt-[12px]">
         <Button secondary onClick={save}>
-          Save
+          저장
         </Button>
-        <Button onClick={onRender}>Render</Button>
+        <Button onClick={onRender}>렌더</Button>
         <Button
           disabled={!variant.mediaId}
           onClick={onSendToComposer}
         >
-          Send to Composer
+          컴포저로 보내기
         </Button>
       </div>
 
       {variant.mediaId && (
         <div className="text-[12px] text-newTextColor/60">
-          Rendered mediaId: <span className="font-mono">{variant.mediaId}</span>
+          렌더된 mediaId: <span className="font-mono">{variant.mediaId}</span>
           {/* TODO(preview): show thumbnail from the rendered Media once the
               render contract returns a url (contract §3 "완료 시 썸네일"). */}
         </div>
@@ -241,14 +241,14 @@ const SlidesForm: FC<{
   };
   return (
     <>
-      <label className={labelClass}>slides</label>
+      <label className={labelClass}>슬라이드</label>
       {slides.map((line, i) => (
         <div key={i} className="flex items-center gap-[8px]">
           <input
             className={inputClass}
             value={line}
             onChange={(e) => update(i, e.target.value)}
-            placeholder={`line ${i + 1}`}
+            placeholder={`${i + 1}번째 줄`}
           />
           <button
             type="button"
@@ -270,7 +270,7 @@ const SlidesForm: FC<{
         className="text-forth text-[13px] hover:underline self-start"
         onClick={() => setSpecField('slides', [...slides, ''])}
       >
-        + add slide
+        + 슬라이드 추가
       </button>
       <Field
         label="cta"
@@ -296,7 +296,7 @@ const CardsForm: FC<{
   };
   return (
     <>
-      <label className={labelClass}>cards</label>
+      <label className={labelClass}>카드</label>
       {cards.map((card, i) => (
         <div
           key={i}
@@ -306,13 +306,13 @@ const CardsForm: FC<{
             className={inputClass}
             value={card.image}
             onChange={(e) => update(i, { image: e.target.value })}
-            placeholder="image (Media id / src)"
+            placeholder="이미지 (Media id / src)"
           />
           <input
             className={inputClass}
             value={card.text}
             onChange={(e) => update(i, { text: e.target.value })}
-            placeholder="text"
+            placeholder="텍스트"
           />
           <button
             type="button"
@@ -336,7 +336,7 @@ const CardsForm: FC<{
           setSpecField('cards', [...cards, { image: '', text: '' }])
         }
       >
-        + add card
+        + 카드 추가
       </button>
       <Field
         label="demoSrc"

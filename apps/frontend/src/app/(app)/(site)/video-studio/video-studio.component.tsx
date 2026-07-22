@@ -169,14 +169,14 @@ const VariantRow: FC<{
           className="text-forth hover:underline"
           onClick={onEdit}
         >
-          Edit
+          수정
         </button>
         <button
           type="button"
           className="text-forth hover:underline"
           onClick={onRender}
         >
-          Render
+          렌더
         </button>
         <button
           type="button"
@@ -184,10 +184,10 @@ const VariantRow: FC<{
           disabled={!variant.mediaId}
           onClick={onSend}
           title={
-            variant.mediaId ? 'Send to Composer' : 'Render first to enable'
+            variant.mediaId ? '컴포저로 보내기' : '렌더 먼저 필요'
           }
         >
-          Send to Composer
+          컴포저로 보내기
         </button>
       </div>
     </div>
@@ -234,7 +234,7 @@ export const VideoStudioComponent: FC = () => {
       method: 'POST',
       body: JSON.stringify({
         slug: 'new-brand',
-        name: 'New Brand',
+        name: '새 브랜드',
         url: 'https://example.com',
         tokens: PRESETS.light,
         fonts: { family: 'Inter', faces: [] },
@@ -242,7 +242,7 @@ export const VideoStudioComponent: FC = () => {
       }),
     });
     if (!res.ok) {
-      toaster.show('Brand create failed — check the fields', 'warning');
+      toaster.show('브랜드 생성 실패 — 입력값을 확인하세요', 'warning');
       return;
     }
     const created: Brand = await res.json();
@@ -250,7 +250,7 @@ export const VideoStudioComponent: FC = () => {
     if (created?.id) {
       setSelectedBrandId(created.id);
     }
-    toaster.show('Brand created', 'success');
+    toaster.show('브랜드 생성됨', 'success');
   }, [fetch, mutateBrands, toaster]);
 
   const saveBrand = useCallback(
@@ -261,11 +261,11 @@ export const VideoStudioComponent: FC = () => {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        toaster.show('Brand save failed — check the fields', 'warning');
+        toaster.show('브랜드 저장 실패 — 입력값을 확인하세요', 'warning');
         return;
       }
       await mutateBrands();
-      toaster.show('Brand saved', 'success');
+      toaster.show('브랜드 저장됨', 'success');
     },
     [fetch, activeBrandId, mutateBrands, toaster]
   );
@@ -286,7 +286,7 @@ export const VideoStudioComponent: FC = () => {
       }),
     });
     if (!res.ok) {
-      toaster.show('Variant create failed — check the fields', 'warning');
+      toaster.show('변형 생성 실패 — 입력값을 확인하세요', 'warning');
       return;
     }
     const created: Variant = await res.json();
@@ -304,23 +304,23 @@ export const VideoStudioComponent: FC = () => {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        toaster.show('Variant save failed — check the fields', 'warning');
+        toaster.show('변형 저장 실패 — 입력값을 확인하세요', 'warning');
         return;
       }
       await mutateVariants();
-      toaster.show('Variant saved', 'success');
+      toaster.show('변형 저장됨', 'success');
     },
     [fetch, selectedVariantId, mutateVariants, toaster]
   );
 
   const renderVariant = useCallback(
     async (variantId: string) => {
-      toaster.show('Render started…');
+      toaster.show('렌더 시작…');
       const res = await fetch(`/video-studio/variants/${variantId}/render`, {
         method: 'POST',
       });
       if (!res.ok) {
-        let message = 'Render failed';
+        let message = '렌더 실패';
         try {
           message = (await res.json())?.message ?? message;
         } catch {}
@@ -328,7 +328,7 @@ export const VideoStudioComponent: FC = () => {
         return;
       }
       await mutateVariants();
-      toaster.show('Render done — media attached', 'success');
+      toaster.show('렌더 완료 — 미디어 연결됨', 'success');
     },
     [fetch, mutateVariants, toaster]
   );
@@ -338,7 +338,7 @@ export const VideoStudioComponent: FC = () => {
   const sendToComposer = useCallback(
     async (variant: Variant) => {
       if (!variant.media?.path) {
-        toaster.show('Render first — no media on this variant', 'warning');
+        toaster.show('렌더부터 하세요 — 이 변형에 미디어가 없습니다', 'warning');
         return;
       }
 
@@ -347,7 +347,7 @@ export const VideoStudioComponent: FC = () => {
         (await fetch('/posts/find-slot')).json(),
       ]);
       if (!integrations?.integrations?.length) {
-        toaster.show('Connect a channel first', 'warning');
+        toaster.show('먼저 채널을 연결하세요', 'warning');
         return;
       }
 
@@ -402,7 +402,7 @@ export const VideoStudioComponent: FC = () => {
     <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col gap-[15px] transition-all">
       {/* Brand selector row */}
       <div className="flex items-center gap-[12px] flex-wrap">
-        <span className="text-textColor font-[600]">Brand</span>
+        <span className="text-textColor font-[600]">브랜드</span>
         <select
           className="bg-newBgColor border border-newTableBorder rounded-[6px] px-[10px] h-[36px] text-textColor min-w-[180px]"
           value={activeBrandId ?? ''}
@@ -417,10 +417,10 @@ export const VideoStudioComponent: FC = () => {
             </option>
           ))}
           {!brandsLoading && (brands ?? []).length === 0 && (
-            <option value="">No brands yet</option>
+            <option value="">브랜드 없음</option>
           )}
         </select>
-        <Button onClick={createBrand}>+ New Brand</Button>
+        <Button onClick={createBrand}>+ 새 브랜드</Button>
       </div>
 
       {/* Brand editor */}
@@ -436,17 +436,17 @@ export const VideoStudioComponent: FC = () => {
       <div className="border border-newTableBorder rounded-[8px] overflow-hidden">
         <div className="flex items-center justify-between px-[12px] py-[10px] bg-newBgColor">
           <span className="text-textColor font-[600]">
-            Variants{activeBrand ? ` (${activeBrand.slug})` : ''}
+            변형{activeBrand ? ` (${activeBrand.slug})` : ''}
           </span>
           <Button onClick={createVariant} disabled={!activeBrandId}>
-            + New Variant
+            + 새 변형
           </Button>
         </div>
         <div className="flex items-center gap-[10px] px-[12px] py-[8px] text-[12px] text-newTextColor/60 border-b border-newTableBorder">
           <div className="flex-1">id</div>
-          <div className="w-[90px]">format</div>
-          <div className="w-[110px]">status</div>
-          <div className="w-[220px]">actions</div>
+          <div className="w-[90px]">포맷</div>
+          <div className="w-[110px]">상태</div>
+          <div className="w-[220px]">동작</div>
         </div>
         {(variants ?? []).map((v) => (
           <VariantRow
@@ -460,7 +460,7 @@ export const VideoStudioComponent: FC = () => {
         ))}
         {(variants ?? []).length === 0 && (
           <div className="px-[12px] py-[16px] text-[13px] text-newTextColor/60">
-            No variants yet.
+            아직 변형이 없습니다.
           </div>
         )}
       </div>

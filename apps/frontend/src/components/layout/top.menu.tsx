@@ -102,7 +102,7 @@ export const useMenuItem = () => {
       path: '/media',
     },
     {
-      name: t('video_studio', 'Video Studio'),
+      name: t('video_studio', '비디오 스튜디오'),
       icon: (
         <svg
           xmlns="http://www.w3.org/2000/svg"

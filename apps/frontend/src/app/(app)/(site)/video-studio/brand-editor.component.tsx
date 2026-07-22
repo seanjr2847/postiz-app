@@ -65,12 +65,12 @@ export const BrandEditor: FC<{
 
   return (
     <div className="border border-newTableBorder rounded-[8px] p-[16px] flex flex-col gap-[14px]">
-      <div className="text-textColor font-[600]">Brand editor</div>
+      <div className="text-textColor font-[600]">브랜드 편집</div>
 
       {/* Basic fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
         <div className="flex flex-col">
-          <label className={labelClass}>Name</label>
+          <label className={labelClass}>이름</label>
           <input
             className={inputClass}
             value={name}
@@ -78,7 +78,7 @@ export const BrandEditor: FC<{
           />
         </div>
         <div className="flex flex-col">
-          <label className={labelClass}>Slug</label>
+          <label className={labelClass}>슬러그</label>
           <input
             className={inputClass}
             value={slug}
@@ -94,7 +94,7 @@ export const BrandEditor: FC<{
           />
         </div>
         <div className="flex flex-col">
-          <label className={labelClass}>Mascot prefix</label>
+          <label className={labelClass}>마스코트 프리픽스</label>
           <input
             className={inputClass}
             value={mascotPrefix}
@@ -106,7 +106,7 @@ export const BrandEditor: FC<{
       {/* Preset + accent */}
       <div className="flex items-center gap-[16px] flex-wrap">
         <div className="flex items-center gap-[8px]">
-          <span className={labelClass + ' !mb-0'}>Preset</span>
+          <span className={labelClass + ' !mb-0'}>프리셋</span>
           <Button secondary onClick={() => applyPreset('light')}>
             Light
           </Button>
@@ -115,7 +115,7 @@ export const BrandEditor: FC<{
           </Button>
         </div>
         <div className="flex items-center gap-[8px]">
-          <span className={labelClass + ' !mb-0'}>Accent</span>
+          <span className={labelClass + ' !mb-0'}>포인트 색</span>
           <input
             type="color"
             className="w-[40px] h-[36px] bg-transparent border border-newTableBorder rounded-[6px] cursor-pointer"
@@ -130,7 +130,7 @@ export const BrandEditor: FC<{
 
       {/* Pillars */}
       <div className="flex flex-col">
-        <label className={labelClass}>Pillars (comma separated)</label>
+        <label className={labelClass}>콘텐츠 기둥 (쉼표 구분)</label>
         <input
           className={inputClass}
           value={pillars.join(', ')}
@@ -147,7 +147,7 @@ export const BrandEditor: FC<{
           className="text-forth text-[13px] hover:underline"
           onClick={() => setAdvancedOpen((o) => !o)}
         >
-          {advancedOpen ? '▾' : '▸'} Advanced — all 14 tokens
+          {advancedOpen ? '▾' : '▸'} 고급 — 토큰 14개 전체
         </button>
         {advancedOpen && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-[10px] mt-[10px]">
@@ -174,7 +174,7 @@ export const BrandEditor: FC<{
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={save}>Save brand</Button>
+        <Button onClick={save}>브랜드 저장</Button>
       </div>
     </div>
   );
