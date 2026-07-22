@@ -51,7 +51,8 @@ class RemotionParams {
   placement: 'text-to-image',
   dto: RemotionParams,
   tools: [],
-  trial: false,
+  // 자체 렌더 서비스(과금 없음) — 트라이얼 게이트에 걸리지 않게 한다.
+  trial: true,
   available: !!process.env.REMOTION_RENDER_URL,
 })
 export class Remotion extends VideoAbstract<RemotionParams> {

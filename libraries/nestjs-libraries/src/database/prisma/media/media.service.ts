@@ -87,7 +87,8 @@ export class MediaService {
       'ai_videos'
     );
 
-    if (totalCredits.credits <= 0) {
+    // 셀프호스트(STRIPE 미설정)는 무제한 — 이미지 경로(media.controller)와 동일한 관례.
+    if (process.env.STRIPE_PUBLISHABLE_KEY && totalCredits.credits <= 0) {
       throw new SubscriptionException({
         action: AuthorizationActions.Create,
         section: Sections.VIDEOS_PER_MONTH,
