@@ -85,6 +85,7 @@ export class MarketingStudioService {
       output: 'vertical',
       customParams: {
         brand: {
+          slug: brand.slug, // 렌더 서비스가 브랜드 데모 에셋 유무 판별(없으면 페이오프 아웃트로 생략)
           tokens: JSON.parse(brand.tokens),
           fonts: JSON.parse(brand.fonts),
           mascotPrefix: brand.mascotPrefix,
