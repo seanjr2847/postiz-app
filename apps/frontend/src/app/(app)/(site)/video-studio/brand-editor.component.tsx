@@ -23,7 +23,8 @@ export const BrandEditor: FC<{
   // DTO(CreateBrandDto/UpdateBrandDto)는 tokens/fonts/pillars 를 객체로 받는다
   // (stringify 는 백엔드 repository 몫) — payload 는 Brand 컬럼형(string)과 다르다.
   onSave: (payload: Record<string, any>) => void;
-}> = ({ brand, onSave }) => {
+  onDelete: () => void;
+}> = ({ brand, onSave, onDelete }) => {
   const [name, setName] = useState(brand.name);
   const [slug, setSlug] = useState(brand.slug);
   const [url, setUrl] = useState(brand.url);
@@ -64,9 +65,8 @@ export const BrandEditor: FC<{
   }, [name, slug, url, mascotPrefix, tokens, pillars, fonts, onSave]);
 
   return (
-    <div className="border border-newTableBorder rounded-[8px] p-[16px] flex flex-col gap-[14px]">
-      <div className="text-textColor font-[600]">브랜드 편집</div>
-
+    // 모달 안에서만 쓰므로 자체 테두리·패딩은 없앤다 (상자 안 상자 방지).
+    <div className="flex flex-col gap-[14px]">
       {/* Basic fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
         <div className="flex flex-col">
@@ -173,7 +173,14 @@ export const BrandEditor: FC<{
         )}
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          className="text-[13px] text-red-400 hover:underline"
+          onClick={onDelete}
+        >
+          브랜드 삭제
+        </button>
         <Button onClick={save}>브랜드 저장</Button>
       </div>
     </div>

@@ -1,10 +1,11 @@
 'use client';
 
-import { FC, useCallback, useMemo, useState } from 'react';
+import { FC, useCallback, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { Button } from '@gitroom/react/form/button';
+import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
@@ -108,6 +109,15 @@ export const FORMATS: VariantFormat[] = [
   'hookcta',
 ];
 
+// 렌더 계약의 포맷 키는 그대로 두고, 화면에는 사람 말로 보여준다.
+export const FORMAT_LABELS: Record<VariantFormat, string> = {
+  slides: '슬라이드',
+  cards: '카드',
+  meme: '밈',
+  ugc: 'UGC 반응',
+  hookcta: '훅 + CTA',
+};
+
 // ---------------------------------------------------------------------------
 // SWR hooks — one hook per resource (project rule: rules-of-hooks compliant).
 // ---------------------------------------------------------------------------
@@ -122,9 +132,7 @@ const useBrands = () => {
 const useVariants = (brandId: string | null) => {
   const fetch = useFetch();
   const load = useCallback(async () => {
-    return (
-      await fetch(`/video-studio/variants?brandId=${brandId}`)
-    ).json();
+    return (await fetch(`/video-studio/variants?brandId=${brandId}`)).json();
   }, [fetch, brandId]);
   return useSWR<Variant[]>(
     brandId ? `video-studio-variants-${brandId}` : null,
@@ -135,12 +143,30 @@ const useVariants = (brandId: string | null) => {
 // ---------------------------------------------------------------------------
 // Small presentational helpers
 // ---------------------------------------------------------------------------
-const STATUS_CHIP: Record<VariantStatus, { label: string; cls: string }> = {
+export const STATUS_CHIP: Record<
+  VariantStatus,
+  { label: string; cls: string }
+> = {
   draft: { label: '초안', cls: 'text-gray-300 bg-gray-500/20' },
   rendered: { label: '렌더됨', cls: 'text-green-300 bg-green-500/20' },
   scheduled: { label: '예약됨', cls: 'text-blue-300 bg-blue-500/20' },
   published: { label: '게시됨', cls: 'text-purple-300 bg-purple-500/20' },
 };
+
+// 렌더된 변형은 실제 프레임을 보여준다 — 텍스트 표만 보고 어느 게 어느 건지
+// 알아내야 했던 게 이 화면의 제일 큰 불만이었다.
+const Thumb: FC<{ variant: Variant }> = ({ variant }) =>
+  variant.media?.path ? (
+    <video
+      // #t=0.1 로 첫 프레임을 포스터처럼 쓴다 — 별도 썸네일 생성 없이.
+      src={`${variant.media.path}#t=0.1`}
+      preload="metadata"
+      muted
+      className="w-[36px] h-[52px] shrink-0 object-cover rounded-[4px] bg-black/30"
+    />
+  ) : (
+    <div className="w-[36px] h-[52px] shrink-0 rounded-[4px] bg-newBgColor border border-newTableBorder" />
+  );
 
 const VariantRow: FC<{
   variant: Variant;
@@ -149,16 +175,15 @@ const VariantRow: FC<{
   rendering: boolean;
   onCheck: () => void;
   onEdit: () => void;
-  onRender: () => void;
-  onSend: () => void;
-}> = ({ variant, selected, checked, rendering, onCheck, onEdit, onRender, onSend }) => {
+  onDelete: () => void;
+}> = ({ variant, selected, checked, rendering, onCheck, onEdit, onDelete }) => {
   const chip = STATUS_CHIP[variant.status] ?? {
     label: variant.status,
     cls: 'text-gray-300 bg-gray-500/20',
   };
   return (
     <div
-      className={`flex items-center gap-[10px] px-[12px] py-[10px] border-b border-newTableBorder text-[14px] cursor-pointer hover:bg-newBgColor ${
+      className={`group flex items-center gap-[10px] px-[12px] py-[8px] border-b border-newTableBorder text-[14px] cursor-pointer hover:bg-newBgColor ${
         selected ? 'bg-newBgColor border-s-[3px] border-s-forth' : ''
       }`}
       onClick={onEdit}
@@ -170,40 +195,35 @@ const VariantRow: FC<{
         onChange={onCheck}
         onClick={(e) => e.stopPropagation()}
       />
-      <div className="flex-1 truncate text-textColor">
-        {variant.hook || (
-          <span className="text-newTextColor/50">(제목 없음)</span>
-        )}
+      <Thumb variant={variant} />
+      <div className="flex-1 min-w-0 flex flex-col gap-[4px]">
+        <div className="truncate text-textColor">
+          {variant.hook || (
+            <span className="text-newTextColor/50">(제목 없음)</span>
+          )}
+        </div>
+        <div className="flex items-center gap-[6px]">
+          <span className="text-[12px] text-newTextColor/60">
+            {FORMAT_LABELS[variant.format] ?? variant.format}
+          </span>
+          <span
+            className={`px-[8px] py-[1px] rounded-full text-[11px] ${chip.cls}`}
+          >
+            {rendering ? '렌더 중…' : chip.label}
+          </span>
+        </div>
       </div>
-      <div className="w-[80px] text-newTextColor/70 text-[12px]">
-        {variant.format}
-      </div>
-      <div className="w-[80px]">
-        <span
-          className={`px-[8px] py-[2px] rounded-full text-[12px] ${chip.cls}`}
-        >
-          {rendering ? '렌더 중…' : chip.label}
-        </span>
-      </div>
-      <div className="flex gap-[10px]" onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
-          className="text-forth hover:underline disabled:opacity-40"
-          disabled={rendering}
-          onClick={onRender}
-        >
-          {rendering ? '렌더 중…' : '렌더'}
-        </button>
-        <button
-          type="button"
-          className="text-forth hover:underline disabled:opacity-30 disabled:no-underline"
-          disabled={!variant.mediaId}
-          onClick={onSend}
-          title={variant.mediaId ? '컴포저로 보내기' : '렌더 먼저 필요'}
-        >
-          게시
-        </button>
-      </div>
+      <button
+        type="button"
+        className="shrink-0 text-newTextColor/40 hover:text-red-400 opacity-0 group-hover:opacity-100"
+        title="변형 삭제"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        ✕
+      </button>
     </div>
   );
 };
@@ -216,8 +236,11 @@ export const VideoStudioComponent: FC = () => {
   const toaster = useToaster();
   const modal = useModals();
 
-  const { data: brands, mutate: mutateBrands, isLoading: brandsLoading } =
-    useBrands();
+  const {
+    data: brands,
+    mutate: mutateBrands,
+    isLoading: brandsLoading,
+  } = useBrands();
 
   const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
@@ -226,7 +249,32 @@ export const VideoStudioComponent: FC = () => {
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [renderingIds, setRenderingIds] = useState<Set<string>>(new Set());
-  const [brandOpen, setBrandOpen] = useState(false);
+
+  // 편집기가 알려주는 "저장 안 한 변경" 플래그 — ref 라서 리렌더를 안 일으킨다.
+  const dirtyRef = useRef(false);
+  const setDirty = useCallback((d: boolean) => {
+    dirtyRef.current = d;
+  }, []);
+
+  // 다른 변형으로 옮기기 전에 편집 중인 내용을 버릴지 묻는다.
+  // (예전엔 key 변경으로 리마운트되며 조용히 사라졌다.)
+  const confirmDiscard = useCallback(async () => {
+    if (!dirtyRef.current) return true;
+    const ok = await deleteDialog(
+      '저장하지 않은 변경이 있습니다. 버리고 이동할까요?',
+      '버리고 이동',
+      '변경 사항 버리기'
+    );
+    if (ok) dirtyRef.current = false;
+    return ok;
+  }, []);
+
+  const selectVariant = useCallback(
+    async (id: string | null) => {
+      if (await confirmDiscard()) setSelectedVariantId(id);
+    },
+    [confirmDiscard]
+  );
 
   const activeBrandId = useMemo(() => {
     if (selectedBrandId) return selectedBrandId;
@@ -288,9 +336,34 @@ export const VideoStudioComponent: FC = () => {
     [fetch, activeBrandId, mutateBrands, toaster]
   );
 
+  // 백엔드엔 DELETE 가 있었는데 화면엔 없었다 — 만들면 지울 수가 없었다.
+  // 설정 모달이 "지웠을 때만" 닫히도록 성공 여부를 돌려준다.
+  const deleteBrand = useCallback(async () => {
+    if (!activeBrand) return false;
+    const ok = await deleteDialog(
+      `「${activeBrand.name}」 브랜드와 그 변형이 모두 사라집니다.`,
+      '브랜드 삭제',
+      '브랜드를 삭제할까요?'
+    );
+    if (!ok) return false;
+    const res = await fetch(`/video-studio/brands/${activeBrand.id}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      toaster.show('브랜드 삭제 실패', 'warning');
+      return false;
+    }
+    setSelectedBrandId(null);
+    setSelectedVariantId(null);
+    await mutateBrands();
+    toaster.show('브랜드 삭제됨', 'success');
+    return true;
+  }, [fetch, activeBrand, mutateBrands, toaster]);
+
   // --- variant actions ---
   const createVariant = useCallback(async () => {
     if (!activeBrandId) return;
+    if (!(await confirmDiscard())) return;
     const res = await fetch('/video-studio/variants', {
       method: 'POST',
       body: JSON.stringify({
@@ -312,7 +385,7 @@ export const VideoStudioComponent: FC = () => {
     if (created?.id) {
       setSelectedVariantId(created.id);
     }
-  }, [fetch, activeBrandId, mutateVariants, toaster]);
+  }, [fetch, activeBrandId, confirmDiscard, mutateVariants, toaster]);
 
   const saveVariant = useCallback(
     async (payload: Record<string, any>) => {
@@ -327,6 +400,36 @@ export const VideoStudioComponent: FC = () => {
       }
       await mutateVariants();
       toaster.show('변형 저장됨', 'success');
+    },
+    [fetch, selectedVariantId, mutateVariants, toaster]
+  );
+
+  const deleteVariant = useCallback(
+    async (variant: Variant) => {
+      const ok = await deleteDialog(
+        `「${variant.hook || '(제목 없음)'}」 변형을 삭제합니다.`,
+        '변형 삭제',
+        '변형을 삭제할까요?'
+      );
+      if (!ok) return;
+      const res = await fetch(`/video-studio/variants/${variant.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        toaster.show('변형 삭제 실패', 'warning');
+        return;
+      }
+      if (selectedVariantId === variant.id) {
+        dirtyRef.current = false;
+        setSelectedVariantId(null);
+      }
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(variant.id);
+        return next;
+      });
+      await mutateVariants();
+      toaster.show('변형 삭제됨', 'success');
     },
     [fetch, selectedVariantId, mutateVariants, toaster]
   );
@@ -378,7 +481,10 @@ export const VideoStudioComponent: FC = () => {
     }
     const { imported, skipped } = await res.json();
     await mutateVariants();
-    toaster.show(`양산 임포트: ${imported}개 추가, ${skipped}개는 이미 있음`, 'success');
+    toaster.show(
+      `양산 임포트: ${imported}개 추가, ${skipped}개는 이미 있음`,
+      'success'
+    );
   }, [fetch, activeBrandId, mutateVariants, toaster]);
 
   // 일괄 렌더 — 체크된 변형을 순차 렌더 (렌더 서비스가 1건씩 처리하므로 직렬)
@@ -409,7 +515,10 @@ export const VideoStudioComponent: FC = () => {
   const sendToComposer = useCallback(
     async (variant: Variant) => {
       if (!variant.media?.path) {
-        toaster.show('렌더부터 하세요 — 이 변형에 미디어가 없습니다', 'warning');
+        toaster.show(
+          '렌더부터 하세요 — 이 변형에 미디어가 없습니다',
+          'warning'
+        );
         return;
       }
 
@@ -468,16 +577,67 @@ export const VideoStudioComponent: FC = () => {
     [fetch, modal, mutateVariants, toaster]
   );
 
+  // 브랜드 설정·소재 도구는 본 작업(변형 목록 + 편집)이 아니라 곁다리다 —
+  // 페이지에 나란히 쌓아두니 다 따로 노는 상자로 보였다. 모달로 내린다.
+  const openBrandSettings = useCallback(() => {
+    if (!activeBrand) return;
+    modal.openModal({
+      title: '브랜드 설정',
+      size: '820px',
+      children: (close) => (
+        <BrandEditor
+          key={activeBrand.id}
+          brand={activeBrand}
+          onSave={async (payload) => {
+            await saveBrand(payload);
+            close();
+          }}
+          onDelete={async () => {
+            if (await deleteBrand()) close();
+          }}
+        />
+      ),
+    });
+  }, [modal, activeBrand, saveBrand, deleteBrand]);
+
+  const openTools = useCallback(() => {
+    modal.openModal({
+      title: '소재 도구 — 스크랩 · CTA · 스티치 · 마스코트',
+      size: '900px',
+      children: <ToolsPanel />,
+    });
+  }, [modal]);
+
+  // 브랜드가 없으면 다른 건 전부 눌러도 아무 일이 없다 — 할 일 하나만 보여준다.
+  if (!brandsLoading && (brands ?? []).length === 0) {
+    return (
+      <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col justify-center items-center text-center gap-[12px]">
+        <div className="text-textColor font-[600] text-[18px]">
+          아직 브랜드가 없습니다
+        </div>
+        <div className="text-[13px] text-newTextColor/60 max-w-[420px]">
+          브랜드는 색·폰트·마스코트를 담는 상자입니다. 여기서 만든 변형은 모두
+          이 브랜드 스타일로 렌더됩니다.
+        </div>
+        <Button onClick={createBrand}>브랜드 만들기</Button>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col gap-[15px] transition-all">
-      {/* Brand selector row — 편집기는 기본 접힘 (자주 안 만짐) */}
-      <div className="flex items-center gap-[12px] flex-wrap">
+      {/* 헤더는 "지금 어느 브랜드로 일하는가" 하나만 말한다 —
+          변형을 만드는 버튼은 전부 목록 헤더로 내려갔다(예전엔 「양산 임포트」와
+          「+ 새 변형」이 서로 다른 줄에 흩어져 있었다). */}
+      <div className="flex items-center gap-[10px] flex-wrap">
         <span className="text-textColor font-[600]">브랜드</span>
         <select
           className="bg-newBgColor border border-newTableBorder rounded-[6px] px-[10px] h-[36px] text-textColor min-w-[180px]"
           value={activeBrandId ?? ''}
-          onChange={(e) => {
-            setSelectedBrandId(e.target.value);
+          onChange={async (e) => {
+            const next = e.target.value;
+            if (!(await confirmDiscard())) return;
+            setSelectedBrandId(next);
             setSelectedVariantId(null);
           }}
         >
@@ -486,117 +646,118 @@ export const VideoStudioComponent: FC = () => {
               {b.name} ({b.slug})
             </option>
           ))}
-          {!brandsLoading && (brands ?? []).length === 0 && (
-            <option value="">브랜드 없음</option>
-          )}
         </select>
         <button
           type="button"
           className="text-forth text-[13px] hover:underline"
-          onClick={() => setBrandOpen((o) => !o)}
+          onClick={openBrandSettings}
         >
-          {brandOpen ? '▾ 브랜드 설정 닫기' : '▸ 브랜드 설정'}
+          설정
+        </button>
+        <button
+          type="button"
+          className="text-forth text-[13px] hover:underline"
+          onClick={createBrand}
+        >
+          + 새 브랜드
         </button>
         <div className="flex-1" />
-        <Button secondary onClick={importRegistry} disabled={!activeBrandId}>
-          양산 임포트
-        </Button>
-        <Button secondary onClick={createBrand}>
-          + 새 브랜드
+        <Button secondary onClick={openTools}>
+          소재 도구
         </Button>
       </div>
 
-      {/* Brand editor (접힘 토글) */}
-      {brandOpen && activeBrand && (
-        <BrandEditor
-          key={activeBrand.id}
-          brand={activeBrand}
-          onSave={saveBrand}
-        />
-      )}
-
-      {/* Variant editor — 목록 위: 행을 클릭하면 바로 여기서 편집 */}
-      {activeVariant && (
-        <VariantEditor
-          key={activeVariant.id}
-          variant={activeVariant}
-          onSave={saveVariant}
-          onRender={() => renderVariant(activeVariant.id)}
-          onSendToComposer={() => sendToComposer(activeVariant)}
-        />
-      )}
-
-      {/* Variant list (내부 스크롤) */}
-      <div className="border border-newTableBorder rounded-[8px] overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between px-[12px] py-[10px] bg-newBgColor">
-          <span className="text-textColor font-[600]">
-            변형 {variants?.length ? `(${variants.length})` : ''}
-          </span>
-          <div className="flex items-center gap-[8px]">
-            <Button
-              secondary
-              onClick={bulkRender}
-              disabled={!checkedIds.size || bulkBusy}
-            >
-              {bulkBusy ? '일괄 렌더 중…' : `선택 렌더 (${checkedIds.size})`}
-            </Button>
-            <Button onClick={createVariant} disabled={!activeBrandId}>
-              + 새 변형
-            </Button>
+      {/* 목록(좌) + 편집기(우) — 행을 클릭해도 레이아웃이 밀리지 않는다.
+          예전엔 편집기가 목록 위에 끼어들어 화면이 통째로 튀었다. */}
+      <div className="flex flex-col lg:flex-row gap-[15px] flex-1 min-h-0">
+        <div className="w-full lg:w-[380px] shrink-0 border border-newTableBorder rounded-[8px] overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between px-[12px] py-[10px] bg-newBgColor gap-[8px]">
+            <span className="text-textColor font-[600]">
+              변형 {variants?.length ? `(${variants.length})` : ''}
+            </span>
+            <div className="flex items-center gap-[8px]">
+              <Button
+                secondary
+                onClick={importRegistry}
+                disabled={!activeBrandId}
+              >
+                양산 임포트
+              </Button>
+              <Button onClick={createVariant} disabled={!activeBrandId}>
+                + 새 변형
+              </Button>
+            </div>
+          </div>
+          {(variants ?? []).length > 0 && (
+            <div className="flex items-center gap-[10px] px-[12px] py-[8px] text-[12px] text-newTextColor/60 border-b border-newTableBorder">
+              <input
+                type="checkbox"
+                className="shrink-0 cursor-pointer"
+                checked={checkedIds.size === (variants ?? []).length}
+                onChange={() =>
+                  setCheckedIds((prev) =>
+                    prev.size === (variants ?? []).length
+                      ? new Set()
+                      : new Set((variants ?? []).map((v) => v.id))
+                  )
+                }
+              />
+              <span className="flex-1">전체 선택</span>
+              {checkedIds.size > 0 && (
+                <Button secondary onClick={bulkRender} disabled={bulkBusy}>
+                  {bulkBusy
+                    ? '일괄 렌더 중…'
+                    : `선택 ${checkedIds.size}개 렌더`}
+                </Button>
+              )}
+            </div>
+          )}
+          <div className="flex-1 min-h-[200px] max-h-[calc(100vh-260px)] overflow-y-auto">
+            {(variants ?? []).map((v) => (
+              <VariantRow
+                key={v.id}
+                variant={v}
+                selected={v.id === selectedVariantId}
+                checked={checkedIds.has(v.id)}
+                rendering={renderingIds.has(v.id)}
+                onCheck={() =>
+                  setCheckedIds((prev) => {
+                    const next = new Set(prev);
+                    next.has(v.id) ? next.delete(v.id) : next.add(v.id);
+                    return next;
+                  })
+                }
+                onEdit={() => selectVariant(v.id)}
+                onDelete={() => deleteVariant(v)}
+              />
+            ))}
+            {(variants ?? []).length === 0 && (
+              <div className="px-[12px] py-[16px] text-[13px] text-newTextColor/60">
+                아직 변형이 없습니다 — 「양산 임포트」로 기존 콘텐츠를
+                가져오거나 「+ 새 변형」으로 시작하세요.
+              </div>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-[10px] px-[12px] py-[8px] text-[12px] text-newTextColor/60 border-b border-newTableBorder">
-          <input
-            type="checkbox"
-            className="shrink-0 cursor-pointer"
-            checked={
-              (variants ?? []).length > 0 &&
-              checkedIds.size === (variants ?? []).length
-            }
-            onChange={() =>
-              setCheckedIds((prev) =>
-                prev.size === (variants ?? []).length
-                  ? new Set()
-                  : new Set((variants ?? []).map((v) => v.id))
-              )
-            }
-          />
-          <div className="flex-1">훅 (행 클릭 = 편집)</div>
-          <div className="w-[80px]">포맷</div>
-          <div className="w-[80px]">상태</div>
-          <div className="w-[90px]">동작</div>
-        </div>
-        <div className="max-h-[420px] overflow-y-auto">
-          {(variants ?? []).map((v) => (
-            <VariantRow
-              key={v.id}
-              variant={v}
-              selected={v.id === selectedVariantId}
-              checked={checkedIds.has(v.id)}
-              rendering={renderingIds.has(v.id)}
-              onCheck={() =>
-                setCheckedIds((prev) => {
-                  const next = new Set(prev);
-                  next.has(v.id) ? next.delete(v.id) : next.add(v.id);
-                  return next;
-                })
-              }
-              onEdit={() => setSelectedVariantId(v.id)}
-              onRender={() => renderVariant(v.id)}
-              onSend={() => sendToComposer(v)}
+
+        <div className="flex-1 min-w-0">
+          {activeVariant ? (
+            <VariantEditor
+              key={activeVariant.id}
+              variant={activeVariant}
+              onSave={saveVariant}
+              onRender={() => renderVariant(activeVariant.id)}
+              onSendToComposer={() => sendToComposer(activeVariant)}
+              onDirtyChange={setDirty}
+              onDelete={() => deleteVariant(activeVariant)}
             />
-          ))}
-          {(variants ?? []).length === 0 && (
-            <div className="px-[12px] py-[16px] text-[13px] text-newTextColor/60">
-              아직 변형이 없습니다 — 「양산 임포트」로 기존 콘텐츠를 가져오거나 「+ 새
-              변형」으로 시작하세요.
+          ) : (
+            <div className="h-full min-h-[200px] border border-dashed border-newTableBorder rounded-[8px] flex items-center justify-center text-[13px] text-newTextColor/50 px-[20px] text-center">
+              왼쪽에서 변형을 고르면 여기서 편집합니다.
             </div>
           )}
         </div>
       </div>
-
-      {/* CLI 도구 (렌더 서비스가 실행) */}
-      <ToolsPanel />
     </div>
   );
 };
@@ -608,7 +769,6 @@ export const VideoStudioComponent: FC = () => {
 const ToolsPanel: FC = () => {
   const fetch = useFetch();
   const toaster = useToaster();
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [scrapeCount, setScrapeCount] = useState('5');
@@ -649,140 +809,138 @@ const ToolsPanel: FC = () => {
     'bg-newBgColor border border-newTableBorder rounded-[6px] px-[10px] h-[36px] text-textColor';
 
   return (
-    <div className="border border-newTableBorder rounded-[8px] p-[16px] flex flex-col gap-[12px]">
-      <button
-        type="button"
-        className="text-forth text-left hover:underline font-[600]"
-        onClick={() => setOpen((o) => !o)}
-      >
-        {open ? '▾' : '▸'} 도구 — 스크랩 · CTA · 스티치 · 마스코트 (렌더 서비스 실행)
-      </button>
-      {open && (
-        <div className="flex flex-col gap-[14px]">
-          {/* 스크랩 */}
-          <div className="flex items-center gap-[8px] flex-wrap">
-            <span className="text-textColor w-[110px]">① 훅 스크랩</span>
-            <input
-              className={inputCls + ' flex-1 min-w-[260px]'}
-              placeholder="유튜브 채널 Shorts URL (https://youtube.com/@x/shorts)"
-              value={scrapeUrl}
-              onChange={(e) => setScrapeUrl(e.target.value)}
-            />
-            <input
-              className={inputCls + ' w-[70px]'}
-              value={scrapeCount}
-              onChange={(e) => setScrapeCount(e.target.value)}
-              title="개수"
-            />
-            <Button
-              secondary
-              disabled={!scrapeUrl || !!busy}
-              onClick={async () => {
-                const d = await run(
-                  'scrape',
-                  { url: scrapeUrl, count: Number(scrapeCount) || 5 },
-                  '훅 스크랩'
-                );
-                if (d?.manifest?.length) {
-                  toaster.show(`클립 ${d.manifest.length}개 확보`, 'success');
-                }
-              }}
-            >
-              스크랩
-            </Button>
-          </div>
-
-          {/* CTA 렌더 */}
-          <div className="flex items-center gap-[8px] flex-wrap">
-            <span className="text-textColor w-[110px]">② CTA 렌더</span>
-            <span className="text-[12px] text-newTextColor/60 flex-1">
-              스티치가 라운드로빈으로 붙일 CTA 클립(3종) 생성
-            </span>
-            <Button
-              secondary
-              disabled={!!busy}
-              onClick={() => run('render-cta', {}, 'CTA 렌더')}
-            >
-              CTA 렌더
-            </Button>
-          </div>
-
-          {/* 스티치 */}
-          <div className="flex items-center gap-[8px] flex-wrap">
-            <span className="text-textColor w-[110px]">③ 스티치</span>
-            <span className="text-[12px] text-newTextColor/60">훅 앞</span>
-            <input
-              className={inputCls + ' w-[60px]'}
-              value={hookSeconds}
-              onChange={(e) => setHookSeconds(e.target.value)}
-            />
-            <span className="text-[12px] text-newTextColor/60 flex-1">
-              초 + CTA 합성 → 완성본은 미디어 라이브러리로 임포트
-            </span>
-            <Button
-              secondary
-              disabled={!!busy}
-              onClick={async () => {
-                const d = await run(
-                  'stitch',
-                  { hookSeconds: Number(hookSeconds) || 3 },
-                  '스티치'
-                );
-                if (d?.files?.length) {
-                  const res = await fetch('/video-studio/tools/stitch/import', {
-                    method: 'POST',
-                    body: JSON.stringify({ urls: d.files }),
-                  });
-                  if (res.ok) {
-                    toaster.show(
-                      `완성본 ${d.files.length}개를 미디어로 가져옴`,
-                      'success'
-                    );
-                  }
-                }
-              }}
-            >
-              스티치 + 임포트
-            </Button>
-          </div>
-
-          {/* 마스코트 */}
-          <div className="flex items-center gap-[8px] flex-wrap">
-            <span className="text-textColor w-[110px]">④ 마스코트</span>
-            <input
-              className={inputCls + ' flex-1 min-w-[220px]'}
-              placeholder="레퍼런스 이미지 URL (fal 업로드)"
-              value={mascotRef}
-              onChange={(e) => setMascotRef(e.target.value)}
-            />
-            <input
-              className={inputCls + ' w-[120px]'}
-              placeholder="포즈 (선택)"
-              value={mascotPose}
-              onChange={(e) => setMascotPose(e.target.value)}
-            />
-            <Button
-              secondary
-              disabled={!mascotRef || !!busy}
-              onClick={() =>
-                run(
-                  'mascot',
-                  { refUrl: mascotRef, ...(mascotPose ? { pose: mascotPose } : {}) },
-                  '마스코트 생성'
-                )
+    <div className="flex flex-col gap-[12px] text-textColor">
+      <div className="text-[13px] text-newTextColor/60">
+        여기서 만든 결과물은 미디어 라이브러리로 들어갑니다 — 변형 편집기의
+        「라이브러리」 버튼으로 골라 쓰세요.
+      </div>
+      <div className="flex flex-col gap-[14px]">
+        {/* 스크랩 */}
+        <div className="flex items-center gap-[8px] flex-wrap">
+          <span className="text-textColor w-[110px]">① 훅 스크랩</span>
+          <input
+            className={inputCls + ' flex-1 min-w-[260px]'}
+            placeholder="유튜브 채널 Shorts URL (https://youtube.com/@x/shorts)"
+            value={scrapeUrl}
+            onChange={(e) => setScrapeUrl(e.target.value)}
+          />
+          <input
+            className={inputCls + ' w-[70px]'}
+            value={scrapeCount}
+            onChange={(e) => setScrapeCount(e.target.value)}
+            title="개수"
+          />
+          <Button
+            secondary
+            disabled={!scrapeUrl || !!busy}
+            onClick={async () => {
+              const d = await run(
+                'scrape',
+                { url: scrapeUrl, count: Number(scrapeCount) || 5 },
+                '훅 스크랩'
+              );
+              if (d?.manifest?.length) {
+                toaster.show(`클립 ${d.manifest.length}개 확보`, 'success');
               }
-            >
-              포즈 생성
-            </Button>
-          </div>
-
-          {log && (
-            <pre className="text-[11px] text-newTextColor/70 bg-newBgColor border border-newTableBorder rounded-[6px] p-[10px] max-h-[220px] overflow-auto whitespace-pre-wrap">
-              {log}
-            </pre>
-          )}
+            }}
+          >
+            스크랩
+          </Button>
         </div>
-      )}
+
+        {/* CTA 렌더 */}
+        <div className="flex items-center gap-[8px] flex-wrap">
+          <span className="text-textColor w-[110px]">② CTA 렌더</span>
+          <span className="text-[12px] text-newTextColor/60 flex-1">
+            스티치가 라운드로빈으로 붙일 CTA 클립(3종) 생성
+          </span>
+          <Button
+            secondary
+            disabled={!!busy}
+            onClick={() => run('render-cta', {}, 'CTA 렌더')}
+          >
+            CTA 렌더
+          </Button>
+        </div>
+
+        {/* 스티치 */}
+        <div className="flex items-center gap-[8px] flex-wrap">
+          <span className="text-textColor w-[110px]">③ 스티치</span>
+          <span className="text-[12px] text-newTextColor/60">훅 앞</span>
+          <input
+            className={inputCls + ' w-[60px]'}
+            value={hookSeconds}
+            onChange={(e) => setHookSeconds(e.target.value)}
+          />
+          <span className="text-[12px] text-newTextColor/60 flex-1">
+            초 + CTA 합성 → 완성본은 미디어 라이브러리로 임포트
+          </span>
+          <Button
+            secondary
+            disabled={!!busy}
+            onClick={async () => {
+              const d = await run(
+                'stitch',
+                { hookSeconds: Number(hookSeconds) || 3 },
+                '스티치'
+              );
+              if (d?.files?.length) {
+                const res = await fetch('/video-studio/tools/stitch/import', {
+                  method: 'POST',
+                  body: JSON.stringify({ urls: d.files }),
+                });
+                if (res.ok) {
+                  toaster.show(
+                    `완성본 ${d.files.length}개를 미디어로 가져옴`,
+                    'success'
+                  );
+                }
+              }
+            }}
+          >
+            스티치 + 임포트
+          </Button>
+        </div>
+
+        {/* 마스코트 */}
+        <div className="flex items-center gap-[8px] flex-wrap">
+          <span className="text-textColor w-[110px]">④ 마스코트</span>
+          <input
+            className={inputCls + ' flex-1 min-w-[220px]'}
+            placeholder="레퍼런스 이미지 URL (fal 업로드)"
+            value={mascotRef}
+            onChange={(e) => setMascotRef(e.target.value)}
+          />
+          <input
+            className={inputCls + ' w-[120px]'}
+            placeholder="포즈 (선택)"
+            value={mascotPose}
+            onChange={(e) => setMascotPose(e.target.value)}
+          />
+          <Button
+            secondary
+            disabled={!mascotRef || !!busy}
+            onClick={() =>
+              run(
+                'mascot',
+                {
+                  refUrl: mascotRef,
+                  ...(mascotPose ? { pose: mascotPose } : {}),
+                },
+                '마스코트 생성'
+              )
+            }
+          >
+            포즈 생성
+          </Button>
+        </div>
+
+        {log && (
+          <pre className="text-[11px] text-newTextColor/70 bg-newBgColor border border-newTableBorder rounded-[6px] p-[10px] max-h-[220px] overflow-auto whitespace-pre-wrap">
+            {log}
+          </pre>
+        )}
+      </div>
     </div>
   );
 };

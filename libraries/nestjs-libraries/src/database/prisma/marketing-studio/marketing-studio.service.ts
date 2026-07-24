@@ -9,6 +9,27 @@ import { UpdateVariantDto } from '@gitroom/nestjs-libraries/dtos/video-studio/up
 import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 
+// 미디어 선택창(컴포저 포함)에 뜨는 이름 — 프론트 FORMAT_LABELS 와 같은 말을 쓴다.
+const FORMAT_LABEL: Record<string, string> = {
+  slides: '슬라이드',
+  cards: '카드',
+  meme: '밈',
+  ugc: 'UGC 반응',
+  hookcta: '훅 + CTA',
+};
+
+const mediaLabel = (
+  brandName: string,
+  variant: { format: string; hook: string | null }
+) =>
+  [
+    brandName,
+    FORMAT_LABEL[variant.format] ?? variant.format,
+    variant.hook?.trim().slice(0, 60) || null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
 @Injectable()
 export class MarketingStudioService {
   constructor(
@@ -101,6 +122,7 @@ export class MarketingStudioService {
     const media = await this._mediaService.generateVideo(org, videoDto);
 
     await this._repository.setVariantMedia(org.id, variantId, media.id);
+    await this._repository.renameMedia(media.id, mediaLabel(brand.name, variant));
     return media;
   }
 
