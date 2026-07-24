@@ -52,6 +52,8 @@ const Field: FC<{
 
 // 미디어 필드 — 손으로 URL 을 붙여넣는 대신 미디어 라이브러리에서 고른다.
 // (레지스트리 임포트가 넣어둔 값도 있으므로 직접 입력은 계속 열어둔다.)
+const isVideoSrc = (v: string) => /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(v);
+
 const MediaField: FC<{
   label: string;
   value: string;
@@ -79,6 +81,23 @@ const MediaField: FC<{
         라이브러리
       </Button>
     </div>
+    {/* 고른 미디어를 텍스트 URL 대신 눈으로 확인 — 렌더 전에 "뭘 골랐는지" 보이게.
+        이미지는 background-image 로 그려 <img> 린트를 피한다. */}
+    {value ? (
+      isVideoSrc(value) ? (
+        <video
+          src={`${value}#t=0.1`}
+          preload="metadata"
+          muted
+          className="mt-[8px] h-[64px] rounded-[6px] border border-newTableBorder bg-black/20 object-cover"
+        />
+      ) : (
+        <div
+          className="mt-[8px] h-[64px] w-[64px] rounded-[6px] border border-newTableBorder bg-newBgColor bg-cover bg-center"
+          style={{ backgroundImage: `url("${value}")` }}
+        />
+      )
+    ) : null}
   </div>
 );
 
