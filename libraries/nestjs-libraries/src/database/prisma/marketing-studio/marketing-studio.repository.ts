@@ -36,6 +36,15 @@ export class MarketingStudioRepository {
     );
   }
 
+  // 렌더 결과 Media 는 업로드 파일명(해시.mp4)으로 저장돼서 미디어 선택창에서
+  // 어느 브랜드의 무슨 영상인지 알 수가 없었다 — 사람이 읽을 이름을 박아준다.
+  renameMedia(id: string, name: string) {
+    return this._media.model.media.update({
+      where: { id },
+      data: { name },
+    });
+  }
+
   // ---- Brands ----
 
   getBrands(orgId: string) {
