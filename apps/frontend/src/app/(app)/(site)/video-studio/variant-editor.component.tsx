@@ -4,7 +4,8 @@ import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@gitroom/react/form/button';
 import { showMediaBox } from '@gitroom/frontend/components/media/media.component';
 import type { Variant, VariantFormat } from './video-studio.component';
-import { FORMATS, FORMAT_LABELS, STATUS_CHIP } from './video-studio.component';
+import { STATUS_CHIP } from './video-studio.component';
+import { FormatPicker, FormatDiagram } from './format-diagram.component';
 
 // cta 는 렌더 계약(v2)상 { text } 객체 — 편집기는 text 만 다루고 저장 시 객체로 감싼다.
 const ctaText = (c: any): string => (typeof c === 'string' ? c : c?.text ?? '');
@@ -51,6 +52,8 @@ const Field: FC<{
 
 // 미디어 필드 — 손으로 URL 을 붙여넣는 대신 미디어 라이브러리에서 고른다.
 // (레지스트리 임포트가 넣어둔 값도 있으므로 직접 입력은 계속 열어둔다.)
+const isVideoSrc = (v: string) => /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(v);
+
 const MediaField: FC<{
   label: string;
   value: string;
@@ -78,6 +81,23 @@ const MediaField: FC<{
         라이브러리
       </Button>
     </div>
+    {/* 고른 미디어를 텍스트 URL 대신 눈으로 확인 — 렌더 전에 "뭘 골랐는지" 보이게.
+        이미지는 background-image 로 그려 <img> 린트를 피한다. */}
+    {value ? (
+      isVideoSrc(value) ? (
+        <video
+          src={`${value}#t=0.1`}
+          preload="metadata"
+          muted
+          className="mt-[8px] h-[64px] rounded-[6px] border border-newTableBorder bg-black/20 object-cover"
+        />
+      ) : (
+        <div
+          className="mt-[8px] h-[64px] w-[64px] rounded-[6px] border border-newTableBorder bg-newBgColor bg-cover bg-center"
+          style={{ backgroundImage: `url("${value}")` }}
+        />
+      )
+    ) : null}
   </div>
 );
 
@@ -118,9 +138,14 @@ export const VariantEditor: FC<{
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
 
+  // 포맷을 바꿔도 CTA 는 포맷 공통이라 유지한다 — 예전엔 조용히 사라졌다.
+  // (훅·캡션·해시태그는 spec 밖 별도 상태라 원래 안 지워진다.)
   const changeFormat = useCallback((next: VariantFormat) => {
     setFormat(next);
-    setSpec(DEFAULT_SPEC[next]);
+    setSpec((prev) => ({
+      ...DEFAULT_SPEC[next],
+      ...(prev?.cta ? { cta: prev.cta } : {}),
+    }));
   }, []);
 
   const setSpecField = useCallback((key: string, value: any) => {
@@ -196,129 +221,138 @@ export const VariantEditor: FC<{
         </div>
       </div>
 
-      {/* format + hook */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
-        <div className="flex flex-col">
-          <label className={labelClass}>포맷</label>
-          <select
-            className={inputClass}
-            value={format}
-            onChange={(e) => changeFormat(e.target.value as VariantFormat)}
-          >
-            {FORMATS.map((f) => (
-              <option key={f} value={f}>
-                {FORMAT_LABELS[f]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <Field
-          label="훅 — 첫 화면에 크게 뜨는 한 줄"
-          value={hook}
-          onChange={setHook}
-        />
-      </div>
+      <div className="flex flex-col lg:flex-row gap-[16px]">
+        <div className="flex-1 min-w-0 flex flex-col gap-[14px]">
+          {/* 포맷 — 이름 드롭다운 대신 그림 카드로 고른다(고르는 순간 결과가 보이게) */}
+          <div className="flex flex-col gap-[6px]">
+            <label className={labelClass}>포맷 — 어떤 영상을 만들지</label>
+            <FormatPicker value={format} onChange={changeFormat} />
+          </div>
 
-      {/* per-format spec fields */}
-      <div className="flex flex-col gap-[12px] border-t border-newTableBorder pt-[12px]">
-        {format === 'slides' && (
-          <SlidesForm spec={spec} setSpecField={setSpecField} />
-        )}
-        {format === 'meme' && (
-          <>
-            <Field
-              label="위 문구"
-              value={spec.topText ?? ''}
-              onChange={(v) => setSpecField('topText', v)}
-            />
-            <Field
-              label="아래 문구"
-              value={spec.bottomText ?? ''}
-              onChange={(v) => setSpecField('bottomText', v)}
-            />
-            <MediaField
-              label="배경 이미지"
-              value={spec.image ?? ''}
-              onChange={(v) => setSpecField('image', v)}
-            />
-            <Field
-              label="CTA 문구 — 마지막에 띄울 행동 유도"
-              value={ctaText(spec.cta)}
-              onChange={(v) => setSpecField('cta', { text: v })}
-            />
-          </>
-        )}
-        {format === 'cards' && (
-          <CardsForm spec={spec} setSpecField={setSpecField} />
-        )}
-        {(format === 'ugc' || format === 'hookcta') && (
-          <>
-            <MediaField
-              label="데모 영상"
-              value={spec.demoSrc ?? ''}
-              onChange={(v) => setSpecField('demoSrc', v)}
-            />
-            {format === 'ugc' && (
-              <MediaField
-                label="반응 영상 (선택)"
-                value={spec.reactionSrc ?? ''}
-                onChange={(v) => setSpecField('reactionSrc', v)}
-              />
+          <Field
+            label="훅 — 첫 화면에 크게 뜨는 한 줄"
+            value={hook}
+            onChange={setHook}
+          />
+
+          {/* per-format spec fields */}
+          <div className="flex flex-col gap-[12px] border-t border-newTableBorder pt-[12px]">
+            {format === 'slides' && (
+              <SlidesForm spec={spec} setSpecField={setSpecField} />
             )}
-            {format === 'hookcta' && (
-              <MediaField
-                label="훅 클립 (선택)"
-                value={spec.hookClipSrc ?? ''}
-                onChange={(v) => setSpecField('hookClipSrc', v)}
-              />
+            {format === 'meme' && (
+              <>
+                <Field
+                  label="위 문구"
+                  value={spec.topText ?? ''}
+                  onChange={(v) => setSpecField('topText', v)}
+                />
+                <Field
+                  label="아래 문구"
+                  value={spec.bottomText ?? ''}
+                  onChange={(v) => setSpecField('bottomText', v)}
+                />
+                <MediaField
+                  label="배경 이미지"
+                  value={spec.image ?? ''}
+                  onChange={(v) => setSpecField('image', v)}
+                />
+                <Field
+                  label="CTA 문구 — 마지막에 띄울 행동 유도"
+                  value={ctaText(spec.cta)}
+                  onChange={(v) => setSpecField('cta', { text: v })}
+                />
+              </>
             )}
-            <Field
-              label="CTA 문구 — 마지막에 띄울 행동 유도"
-              value={ctaText(spec.cta)}
-              onChange={(v) => setSpecField('cta', { text: v })}
+            {format === 'cards' && (
+              <CardsForm spec={spec} setSpecField={setSpecField} />
+            )}
+            {(format === 'ugc' || format === 'hookcta') && (
+              <>
+                <MediaField
+                  label="데모 영상"
+                  value={spec.demoSrc ?? ''}
+                  onChange={(v) => setSpecField('demoSrc', v)}
+                />
+                {format === 'ugc' && (
+                  <MediaField
+                    label="반응 영상 (선택)"
+                    value={spec.reactionSrc ?? ''}
+                    onChange={(v) => setSpecField('reactionSrc', v)}
+                  />
+                )}
+                {format === 'hookcta' && (
+                  <MediaField
+                    label="훅 클립 (선택)"
+                    value={spec.hookClipSrc ?? ''}
+                    onChange={(v) => setSpecField('hookClipSrc', v)}
+                  />
+                )}
+                <Field
+                  label="CTA 문구 — 마지막에 띄울 행동 유도"
+                  value={ctaText(spec.cta)}
+                  onChange={(v) => setSpecField('cta', { text: v })}
+                />
+              </>
+            )}
+          </div>
+
+          {/* caption + hashtags */}
+          <div className="flex flex-col gap-[12px] border-t border-newTableBorder pt-[12px]">
+            <div className="flex flex-col">
+              <label className={labelClass}>
+                캡션 — 게시할 때 본문에 들어갑니다
+              </label>
+              <textarea
+                className="bg-newBgColor border border-newTableBorder rounded-[6px] px-[10px] py-[8px] text-textColor w-full min-h-[70px]"
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col">
+              <label className={labelClass}>해시태그 (띄어쓰기 구분)</label>
+              <input
+                className={inputClass}
+                value={hashtags.join(' ')}
+                placeholder="#마케팅 #숏폼"
+                onChange={(e) =>
+                  setHashtags(
+                    e.target.value.split(/\s+/).filter((h) => h.length > 0)
+                  )
+                }
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* 실시간 레이아웃 미리보기 — 입력하는 대로 무엇이 어디에 들어가는지 보인다.
+            실제 영상은 렌더가 만들지만, "뭘 하면 뭐가 나오나" 는 여기서 즉시 답한다. */}
+        <aside className="lg:w-[210px] shrink-0">
+          <div className="lg:sticky lg:top-[12px] flex flex-col gap-[8px]">
+            <div className={labelClass}>미리보기</div>
+            <FormatDiagram
+              format={format}
+              spec={spec}
+              hook={hook}
+              className="w-[180px]"
             />
-          </>
-        )}
+            <div className="text-[11px] leading-[1.4] text-newTextColor/50">
+              레이아웃 미리보기입니다 — 실제 영상은 아래 「렌더」로 만듭니다.
+            </div>
+            {variant.media?.path && (
+              <div className="flex flex-col gap-[6px] pt-[8px] border-t border-newTableBorder">
+                <div className={labelClass}>렌더 결과</div>
+                <video
+                  controls
+                  preload="metadata"
+                  className="w-[180px] rounded-[8px] border border-newTableBorder"
+                  src={variant.media.path}
+                />
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
-
-      {/* caption + hashtags */}
-      <div className="flex flex-col gap-[12px] border-t border-newTableBorder pt-[12px]">
-        <div className="flex flex-col">
-          <label className={labelClass}>
-            캡션 — 게시할 때 본문에 들어갑니다
-          </label>
-          <textarea
-            className="bg-newBgColor border border-newTableBorder rounded-[6px] px-[10px] py-[8px] text-textColor w-full min-h-[70px]"
-            value={caption}
-            onChange={(e) => setCaption(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col">
-          <label className={labelClass}>해시태그 (띄어쓰기 구분)</label>
-          <input
-            className={inputClass}
-            value={hashtags.join(' ')}
-            placeholder="#마케팅 #숏폼"
-            onChange={(e) =>
-              setHashtags(
-                e.target.value.split(/\s+/).filter((h) => h.length > 0)
-              )
-            }
-          />
-        </div>
-      </div>
-
-      {variant.media?.path && (
-        <div className="flex flex-col gap-[8px] border-t border-newTableBorder pt-[12px]">
-          <div className={labelClass}>렌더 결과</div>
-          <video
-            controls
-            preload="metadata"
-            className="w-[220px] rounded-[8px] border border-newTableBorder"
-            src={variant.media.path}
-          />
-        </div>
-      )}
 
       {/* actions — 저장·렌더·게시가 같은 굵기로 나란히 있어서 어느 걸 먼저
           눌러야 하는지 알 수 없었다. 지금 할 일 하나만 강조한다. */}

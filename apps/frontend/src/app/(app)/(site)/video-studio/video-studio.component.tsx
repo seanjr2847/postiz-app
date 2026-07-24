@@ -175,8 +175,18 @@ const VariantRow: FC<{
   rendering: boolean;
   onCheck: () => void;
   onEdit: () => void;
+  onDuplicate: () => void;
   onDelete: () => void;
-}> = ({ variant, selected, checked, rendering, onCheck, onEdit, onDelete }) => {
+}> = ({
+  variant,
+  selected,
+  checked,
+  rendering,
+  onCheck,
+  onEdit,
+  onDuplicate,
+  onDelete,
+}) => {
   const chip = STATUS_CHIP[variant.status] ?? {
     label: variant.status,
     cls: 'text-gray-300 bg-gray-500/20',
@@ -215,8 +225,19 @@ const VariantRow: FC<{
       </div>
       <button
         type="button"
+        className="shrink-0 text-newTextColor/40 hover:text-forth opacity-0 group-hover:opacity-100"
+        title="영상 복제"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDuplicate();
+        }}
+      >
+        ⧉
+      </button>
+      <button
+        type="button"
         className="shrink-0 text-newTextColor/40 hover:text-red-400 opacity-0 group-hover:opacity-100"
-        title="변형 삭제"
+        title="영상 삭제"
         onClick={(e) => {
           e.stopPropagation();
           onDelete();
@@ -240,7 +261,15 @@ export const VideoStudioComponent: FC = () => {
     data: brands,
     mutate: mutateBrands,
     isLoading: brandsLoading,
+    error: brandsError,
   } = useBrands();
+
+  // 백엔드가 500(에러 객체)을 주면 data 가 배열이 아니라 아래 .map/.find 가 터져
+  // 목록 화면 전체가 죽는다 — 배열 아니면 빈 배열로(애널리틱스와 같은 관례).
+  const safeBrands = useMemo(
+    () => (Array.isArray(brands) ? brands : []),
+    [brands]
+  );
 
   const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
@@ -278,29 +307,42 @@ export const VideoStudioComponent: FC = () => {
 
   const activeBrandId = useMemo(() => {
     if (selectedBrandId) return selectedBrandId;
-    return brands?.[0]?.id ?? null;
-  }, [selectedBrandId, brands]);
+    return safeBrands[0]?.id ?? null;
+  }, [selectedBrandId, safeBrands]);
 
   const activeBrand = useMemo(
-    () => brands?.find((b) => b.id === activeBrandId) ?? null,
-    [brands, activeBrandId]
+    () => safeBrands.find((b) => b.id === activeBrandId) ?? null,
+    [safeBrands, activeBrandId]
   );
 
-  const { data: variants, mutate: mutateVariants } = useVariants(activeBrandId);
+  const {
+    data: variants,
+    mutate: mutateVariants,
+    error: variantsError,
+  } = useVariants(activeBrandId);
+
+  const safeVariants = useMemo(
+    () => (Array.isArray(variants) ? variants : []),
+    [variants]
+  );
 
   const activeVariant = useMemo(
-    () => variants?.find((v) => v.id === selectedVariantId) ?? null,
-    [variants, selectedVariantId]
+    () => safeVariants.find((v) => v.id === selectedVariantId) ?? null,
+    [safeVariants, selectedVariantId]
   );
 
   // --- brand actions ---
   const createBrand = useCallback(async () => {
+    // 이름·slug 를 매번 똑같이 하드코딩하면 두 개 만들 때 드롭다운에서 구분이 안 된다.
+    // 번호로 구분 가능한 이름 + 충돌 없는 slug 를 준다(이름은 설정에서 바꾸면 된다).
+    const n = safeBrands.length + 1;
+    const slug = `brand-${Math.random().toString(36).slice(2, 8)}`;
     // DTO 는 tokens/fonts/pillars 를 객체로 검증한다 — stringify 는 백엔드 repository 몫.
     const res = await fetch('/video-studio/brands', {
       method: 'POST',
       body: JSON.stringify({
-        slug: 'new-brand',
-        name: '새 브랜드',
+        slug,
+        name: `새 브랜드 ${n}`,
         url: 'https://example.com',
         tokens: PRESETS.light,
         fonts: { family: 'Inter', faces: [] },
@@ -316,8 +358,8 @@ export const VideoStudioComponent: FC = () => {
     if (created?.id) {
       setSelectedBrandId(created.id);
     }
-    toaster.show('브랜드 생성됨', 'success');
-  }, [fetch, mutateBrands, toaster]);
+    toaster.show('브랜드 생성됨 — 「설정」에서 이름을 바꾸세요', 'success');
+  }, [fetch, safeBrands, mutateBrands, toaster]);
 
   const saveBrand = useCallback(
     async (payload: Record<string, any>) => {
@@ -377,7 +419,7 @@ export const VideoStudioComponent: FC = () => {
       }),
     });
     if (!res.ok) {
-      toaster.show('변형 생성 실패 — 입력값을 확인하세요', 'warning');
+      toaster.show('영상 생성 실패 — 입력값을 확인하세요', 'warning');
       return;
     }
     const created: Variant = await res.json();
@@ -395,11 +437,11 @@ export const VideoStudioComponent: FC = () => {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        toaster.show('변형 저장 실패 — 입력값을 확인하세요', 'warning');
+        toaster.show('영상 저장 실패 — 입력값을 확인하세요', 'warning');
         return;
       }
       await mutateVariants();
-      toaster.show('변형 저장됨', 'success');
+      toaster.show('영상 저장됨', 'success');
     },
     [fetch, selectedVariantId, mutateVariants, toaster]
   );
@@ -407,16 +449,16 @@ export const VideoStudioComponent: FC = () => {
   const deleteVariant = useCallback(
     async (variant: Variant) => {
       const ok = await deleteDialog(
-        `「${variant.hook || '(제목 없음)'}」 변형을 삭제합니다.`,
-        '변형 삭제',
-        '변형을 삭제할까요?'
+        `「${variant.hook || '(제목 없음)'}」 영상을 삭제합니다.`,
+        '영상 삭제',
+        '영상을 삭제할까요?'
       );
       if (!ok) return;
       const res = await fetch(`/video-studio/variants/${variant.id}`, {
         method: 'DELETE',
       });
       if (!res.ok) {
-        toaster.show('변형 삭제 실패', 'warning');
+        toaster.show('영상 삭제 실패', 'warning');
         return;
       }
       if (selectedVariantId === variant.id) {
@@ -429,9 +471,46 @@ export const VideoStudioComponent: FC = () => {
         return next;
       });
       await mutateVariants();
-      toaster.show('변형 삭제됨', 'success');
+      toaster.show('영상 삭제됨', 'success');
     },
     [fetch, selectedVariantId, mutateVariants, toaster]
+  );
+
+  // 복제 — 스튜디오의 핵심은 "양산"이라 하나 만들어 조금씩 바꿔 여러 개 뽑는다.
+  // 백엔드 복제 엔드포인트 없이 기존 POST 로 필드를 그대로 복사(초안·미디어 없음 상태로).
+  const duplicateVariant = useCallback(
+    async (variant: Variant) => {
+      if (!activeBrandId) return;
+      if (!(await confirmDiscard())) return;
+      const parse = (s: string | null | undefined, fallback: any) => {
+        try {
+          return s ? JSON.parse(s) : fallback;
+        } catch {
+          return fallback;
+        }
+      };
+      const res = await fetch('/video-studio/variants', {
+        method: 'POST',
+        body: JSON.stringify({
+          brandId: activeBrandId,
+          format: variant.format,
+          status: 'draft',
+          hook: variant.hook ? `${variant.hook} (복사)` : '',
+          spec: parse(variant.spec, {}),
+          caption: variant.caption ?? '',
+          hashtags: parse(variant.hashtags, []),
+        }),
+      });
+      if (!res.ok) {
+        toaster.show('복제 실패 — 다시 시도하세요', 'warning');
+        return;
+      }
+      const created: Variant = await res.json();
+      await mutateVariants();
+      if (created?.id) setSelectedVariantId(created.id);
+      toaster.show('영상을 복제했습니다', 'success');
+    },
+    [fetch, activeBrandId, confirmDiscard, mutateVariants, toaster]
   );
 
   const renderVariant = useCallback(
@@ -466,7 +545,7 @@ export const VideoStudioComponent: FC = () => {
   // 양산 임포트 — 렌더 서비스 레지스트리(정적+생성엔진 전체)에서 없는 것만 추가
   const importRegistry = useCallback(async () => {
     if (!activeBrandId) return;
-    toaster.show('레지스트리에서 가져오는 중…');
+    toaster.show('기존 콘텐츠를 가져오는 중…');
     const res = await fetch(
       `/video-studio/brands/${activeBrandId}/import-registry`,
       { method: 'POST' }
@@ -482,7 +561,7 @@ export const VideoStudioComponent: FC = () => {
     const { imported, skipped } = await res.json();
     await mutateVariants();
     toaster.show(
-      `양산 임포트: ${imported}개 추가, ${skipped}개는 이미 있음`,
+      `불러오기: ${imported}개 추가, ${skipped}개는 이미 있음`,
       'success'
     );
   }, [fetch, activeBrandId, mutateVariants, toaster]);
@@ -602,21 +681,36 @@ export const VideoStudioComponent: FC = () => {
 
   const openTools = useCallback(() => {
     modal.openModal({
-      title: '소재 도구 — 스크랩 · CTA · 스티치 · 마스코트',
+      title: '클립 만들기 — 스크랩 · CTA · 스티치 · 마스코트',
       size: '900px',
       children: <ToolsPanel />,
     });
   }, [modal]);
 
+  // 브랜드 목록을 못 불러온 경우(500 등) — 빈 상태처럼 보이지 않게 따로 안내한다.
+  if (!brandsLoading && brandsError) {
+    return (
+      <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col justify-center items-center text-center gap-[12px]">
+        <div className="text-textColor font-[600] text-[18px]">
+          브랜드를 불러오지 못했습니다
+        </div>
+        <div className="text-[13px] text-newTextColor/60">
+          잠시 후 다시 시도해 주세요.
+        </div>
+        <Button onClick={() => mutateBrands()}>다시 시도</Button>
+      </div>
+    );
+  }
+
   // 브랜드가 없으면 다른 건 전부 눌러도 아무 일이 없다 — 할 일 하나만 보여준다.
-  if (!brandsLoading && (brands ?? []).length === 0) {
+  if (!brandsLoading && safeBrands.length === 0) {
     return (
       <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col justify-center items-center text-center gap-[12px]">
         <div className="text-textColor font-[600] text-[18px]">
           아직 브랜드가 없습니다
         </div>
         <div className="text-[13px] text-newTextColor/60 max-w-[420px]">
-          브랜드는 색·폰트·마스코트를 담는 상자입니다. 여기서 만든 변형은 모두
+          브랜드는 색·폰트·마스코트를 담는 상자입니다. 여기서 만든 영상은 모두
           이 브랜드 스타일로 렌더됩니다.
         </div>
         <Button onClick={createBrand}>브랜드 만들기</Button>
@@ -641,7 +735,7 @@ export const VideoStudioComponent: FC = () => {
             setSelectedVariantId(null);
           }}
         >
-          {(brands ?? []).map((b) => (
+          {safeBrands.map((b) => (
             <option key={b.id} value={b.id}>
               {b.name} ({b.slug})
             </option>
@@ -663,8 +757,19 @@ export const VideoStudioComponent: FC = () => {
         </button>
         <div className="flex-1" />
         <Button secondary onClick={openTools}>
-          소재 도구
+          클립 만들기 (고급)
         </Button>
+      </div>
+
+      {/* 이 화면이 어떻게 굴러가는지 한 줄 — 처음 온 사람이 순서를 잃지 않게. */}
+      <div className="flex items-center gap-[8px] flex-wrap text-[12px] text-newTextColor/60">
+        <span>영상 고르기·만들기</span>
+        <span className="text-newTextColor/30">→</span>
+        <span>내용 입력</span>
+        <span className="text-newTextColor/30">→</span>
+        <span>렌더 (영상 생성)</span>
+        <span className="text-newTextColor/30">→</span>
+        <span>컴포저로 보내 게시</span>
       </div>
 
       {/* 목록(좌) + 편집기(우) — 행을 클릭해도 레이아웃이 밀리지 않는다.
@@ -673,7 +778,7 @@ export const VideoStudioComponent: FC = () => {
         <div className="w-full lg:w-[380px] shrink-0 border border-newTableBorder rounded-[8px] overflow-hidden flex flex-col">
           <div className="flex items-center justify-between px-[12px] py-[10px] bg-newBgColor gap-[8px]">
             <span className="text-textColor font-[600]">
-              변형 {variants?.length ? `(${variants.length})` : ''}
+              영상 {safeVariants.length ? `(${safeVariants.length})` : ''}
             </span>
             <div className="flex items-center gap-[8px]">
               <Button
@@ -681,24 +786,24 @@ export const VideoStudioComponent: FC = () => {
                 onClick={importRegistry}
                 disabled={!activeBrandId}
               >
-                양산 임포트
+                기존 콘텐츠 불러오기
               </Button>
               <Button onClick={createVariant} disabled={!activeBrandId}>
-                + 새 변형
+                + 새 영상
               </Button>
             </div>
           </div>
-          {(variants ?? []).length > 0 && (
+          {safeVariants.length > 0 && (
             <div className="flex items-center gap-[10px] px-[12px] py-[8px] text-[12px] text-newTextColor/60 border-b border-newTableBorder">
               <input
                 type="checkbox"
                 className="shrink-0 cursor-pointer"
-                checked={checkedIds.size === (variants ?? []).length}
+                checked={checkedIds.size === safeVariants.length}
                 onChange={() =>
                   setCheckedIds((prev) =>
-                    prev.size === (variants ?? []).length
+                    prev.size === safeVariants.length
                       ? new Set()
-                      : new Set((variants ?? []).map((v) => v.id))
+                      : new Set(safeVariants.map((v) => v.id))
                   )
                 }
               />
@@ -713,29 +818,46 @@ export const VideoStudioComponent: FC = () => {
             </div>
           )}
           <div className="flex-1 min-h-[200px] max-h-[calc(100vh-260px)] overflow-y-auto">
-            {(variants ?? []).map((v) => (
-              <VariantRow
-                key={v.id}
-                variant={v}
-                selected={v.id === selectedVariantId}
-                checked={checkedIds.has(v.id)}
-                rendering={renderingIds.has(v.id)}
-                onCheck={() =>
-                  setCheckedIds((prev) => {
-                    const next = new Set(prev);
-                    next.has(v.id) ? next.delete(v.id) : next.add(v.id);
-                    return next;
-                  })
-                }
-                onEdit={() => selectVariant(v.id)}
-                onDelete={() => deleteVariant(v)}
-              />
-            ))}
-            {(variants ?? []).length === 0 && (
+            {variantsError ? (
+              // 목록을 못 불러온 경우(500 등) — "영상 없음"처럼 보이지 않게 따로 안내.
               <div className="px-[12px] py-[16px] text-[13px] text-newTextColor/60">
-                아직 변형이 없습니다 — 「양산 임포트」로 기존 콘텐츠를
-                가져오거나 「+ 새 변형」으로 시작하세요.
+                영상을 불러오지 못했습니다.{' '}
+                <button
+                  type="button"
+                  className="text-forth hover:underline"
+                  onClick={() => mutateVariants()}
+                >
+                  다시 시도
+                </button>
               </div>
+            ) : (
+              <>
+                {safeVariants.map((v) => (
+                  <VariantRow
+                    key={v.id}
+                    variant={v}
+                    selected={v.id === selectedVariantId}
+                    checked={checkedIds.has(v.id)}
+                    rendering={renderingIds.has(v.id)}
+                    onCheck={() =>
+                      setCheckedIds((prev) => {
+                        const next = new Set(prev);
+                        next.has(v.id) ? next.delete(v.id) : next.add(v.id);
+                        return next;
+                      })
+                    }
+                    onEdit={() => selectVariant(v.id)}
+                    onDuplicate={() => duplicateVariant(v)}
+                    onDelete={() => deleteVariant(v)}
+                  />
+                ))}
+                {safeVariants.length === 0 && (
+                  <div className="px-[12px] py-[16px] text-[13px] text-newTextColor/60">
+                    아직 영상이 없습니다 — 「기존 콘텐츠 불러오기」로 가져오거나
+                    「+ 새 영상」으로 시작하세요.
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -753,7 +875,7 @@ export const VideoStudioComponent: FC = () => {
             />
           ) : (
             <div className="h-full min-h-[200px] border border-dashed border-newTableBorder rounded-[8px] flex items-center justify-center text-[13px] text-newTextColor/50 px-[20px] text-center">
-              왼쪽에서 변형을 고르면 여기서 편집합니다.
+              왼쪽에서 영상을 고르면 여기서 편집합니다.
             </div>
           )}
         </div>
@@ -811,7 +933,7 @@ const ToolsPanel: FC = () => {
   return (
     <div className="flex flex-col gap-[12px] text-textColor">
       <div className="text-[13px] text-newTextColor/60">
-        여기서 만든 결과물은 미디어 라이브러리로 들어갑니다 — 변형 편집기의
+        여기서 만든 결과물은 미디어 라이브러리로 들어갑니다 — 영상 편집기의
         「라이브러리」 버튼으로 골라 쓰세요.
       </div>
       <div className="flex flex-col gap-[14px]">
