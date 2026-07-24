@@ -51,8 +51,13 @@ export const RenderAnalytics: FC<{
 
   const t = useT();
 
+  // 백엔드가 500(예: 토큰 만료 후 재연결 실패 "Channel not found")이면 data 가
+  // 에러 객체라 .map 이 터져 페이지 전체가 죽는다 → 배열 아니면 빈 배열로 취급,
+  // 아래 length===0 분기가 "리프레시 필요" UI 를 띄운다.
+  const list: any[] = Array.isArray(data) ? data : [];
+
   const total = useMemo(() => {
-    return data?.map((p: any) => {
+    return list.map((p: any) => {
       const value =
         (p?.data.reduce((acc: number, curr: any) => acc + curr.total, 0) || 0) /
         (p.average ? p.data.length : 1);
@@ -61,7 +66,7 @@ export const RenderAnalytics: FC<{
       }
       return value;
     });
-  }, [data]);
+  }, [list]);
   if (loading) {
     return (
       <>
@@ -71,7 +76,7 @@ export const RenderAnalytics: FC<{
   }
   return (
     <div className="grid grid-cols-3 gap-[20px]">
-      {data?.length === 0 && (
+      {list.length === 0 && (
         <div>
           {t(
             'this_channel_needs_to_be_refreshed',
@@ -85,7 +90,7 @@ export const RenderAnalytics: FC<{
           </div>
         </div>
       )}
-      {data?.map((p: any, index: number) => (
+      {list.map((p: any, index: number) => (
         <div key={`pl-${index}`} className="flex">
           <div className="flex-1 bg-newTableHeader rounded-[8px] py-[10px] px-[16px] gap-[10px] flex flex-col">
             <div className="flex items-center gap-[14px]">
