@@ -200,6 +200,9 @@ export const showMediaBox = (
 };
 const CHUNK_SIZE = 1024 * 1024;
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
+// 업로드된 미디어의 name 은 스토리지 파일명(해시.mp4)이라 띄워봐야 소음이다.
+// 비디오 스튜디오가 붙인 "브랜드 · 포맷 · 훅" 처럼 띄어쓰기가 있는 이름만 보여준다.
+const readableName = (name?: string) => (name?.includes(' ') ? name : '');
 export const MediaBox: FC<{
   setMedia: (params: { id: string; path: string }[]) => void;
   standalone?: boolean;
@@ -539,6 +542,8 @@ export const MediaBox: FC<{
                     !standalone && 'cursor-pointer'
                   )}
                   key={media.id}
+                  // 이름 전체는 툴팁으로 — 아래 라벨은 두 줄에서 잘린다.
+                  title={readableName(media.name)}
                 >
                   <div
                     className={clsx(
@@ -592,6 +597,13 @@ export const MediaBox: FC<{
                         />
                       )}
                     </div>
+                    {/* 썸네일만으로는 어느 브랜드의 무슨 영상인지 알 수 없었다.
+                        비디오 스튜디오 렌더물은 "브랜드 · 포맷 · 훅" 이 들어온다. */}
+                    {!!readableName(media.name) && (
+                      <div className="pointer-events-none absolute bottom-0 start-0 end-0 px-[6px] pt-[14px] pb-[5px] rounded-b-[6px] overflow-hidden bg-gradient-to-t from-black/85 to-transparent text-white text-[10px] leading-[13px] line-clamp-2 break-all">
+                        {readableName(media.name)}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
