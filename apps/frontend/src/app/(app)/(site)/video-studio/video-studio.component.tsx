@@ -188,9 +188,12 @@ const etaText = (msPerItem: number, left: number) => {
 };
 
 // 큐에 들어간 항목은 큐 상태가 DB 상태를 가린다 — "지금 무슨 일이 일어나는가"가 먼저다.
+// 색은 팔레트 색(amber/red)으로만 알파를 쓴다 — 테마가 forth 를 `var(--color-forth)`
+// (알파 자리 없는 평범한 hex)로 정의해서 `bg-forth/15` 는 알파가 무시되고 통짜 보라가
+// 된다. gray 도 테마가 스케일 전체를 단색 var 로 덮어써서 `bg-gray-500` 은 아예 없다.
 const jobChip = (job: Job | undefined, elapsed: number) =>
   job?.state === 'running'
-    ? { label: `렌더 중 ${mmss(elapsed)}`, cls: 'text-forth bg-forth/15' }
+    ? { label: `렌더 중 ${mmss(elapsed)}`, cls: 'text-amber-200 bg-amber-500/20' }
     : job?.state === 'queued'
     ? { label: '대기', cls: 'text-newTextColor/70 bg-newTableBorder' }
     : job?.state === 'failed'
