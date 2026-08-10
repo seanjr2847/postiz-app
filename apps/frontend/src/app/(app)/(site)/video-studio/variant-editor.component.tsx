@@ -89,6 +89,8 @@ export const VariantEditor: FC<{
   onSendToComposer: () => void;
   onDirtyChange: (dirty: boolean) => void;
   onDelete: () => void;
+  // 큐가 도는 중이면 이 버튼으로 렌더를 끼워 넣을 수 없다(렌더 서비스가 1건씩 처리).
+  queueActive?: boolean;
 }> = ({
   variant,
   onSave,
@@ -96,6 +98,7 @@ export const VariantEditor: FC<{
   onSendToComposer,
   onDirtyChange,
   onDelete,
+  queueActive,
 }) => {
   const [format, setFormat] = useState<VariantFormat>(variant.format);
   const [hook, setHook] = useState(variant.hook ?? '');
@@ -334,10 +337,16 @@ export const VariantEditor: FC<{
           </Button>
           <Button
             secondary={step !== 'render'}
-            disabled={busy}
+            disabled={busy || queueActive}
             onClick={() => saveThen(onRender)}
           >
-            {busy ? '처리 중…' : dirty ? '저장 후 렌더' : '렌더'}
+            {busy
+              ? '처리 중…'
+              : queueActive
+              ? '렌더 큐 도는 중'
+              : dirty
+              ? '저장 후 렌더'
+              : '렌더'}
           </Button>
           <Button
             secondary={step !== 'publish'}

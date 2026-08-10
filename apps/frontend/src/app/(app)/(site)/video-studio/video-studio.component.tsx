@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, useCallback, useMemo, useRef, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useToaster } from '@gitroom/react/toaster/toaster';
@@ -153,6 +153,179 @@ export const STATUS_CHIP: Record<
   published: { label: '게시됨', cls: 'text-purple-300 bg-purple-500/20' },
 };
 
+// ---------------------------------------------------------------------------
+// 렌더 큐 — 렌더는 항목당 5~70초짜리 동기 HTTP 이고 렌더 서비스가 1건씩 처리한다.
+// 진행 상황을 사라지는 토스트에 맡기면 무엇이 도는지 알 수 없으므로, 큐를 UI 상태로
+// 들고 화면에 계속 띄운다. 실패는 지우지 않고 남겨서 다시 렌더할 수 있게 한다.
+// 'aborted' 는 'failed' 와 따로 둔다 — 사용자가 일부러 멈춘 것을 실패로 칠하면
+// 정확히 이 화면이 없애려던 혼동을 다시 만든다.
+// ponytail: 새로고침하면 큐는 사라진다(렌더 자체는 서버에서 계속 돌고 DB 에 반영됨).
+//           살아남게 하려면 백엔드 job 테이블 + 폴링이 필요 — 그때 올린다.
+// ---------------------------------------------------------------------------
+type JobState = 'queued' | 'running' | 'done' | 'failed' | 'aborted';
+
+interface Job {
+  id: string;
+  hook: string;
+  format: string;
+  state: JobState;
+  error?: string;
+  ms?: number;
+}
+
+const mmss = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(
+    s % 60
+  ).padStart(2, '0')}`;
+};
+
+const etaText = (msPerItem: number, left: number) => {
+  const total = msPerItem * left;
+  return total < 90_000
+    ? `~${Math.max(1, Math.round(total / 1000))}초`
+    : `~${Math.round(total / 60_000)}분`;
+};
+
+// 큐에 들어간 항목은 큐 상태가 DB 상태를 가린다 — "지금 무슨 일이 일어나는가"가 먼저다.
+const jobChip = (job: Job | undefined, elapsed: number) =>
+  job?.state === 'running'
+    ? { label: `렌더 중 ${mmss(elapsed)}`, cls: 'text-forth bg-forth/15' }
+    : job?.state === 'queued'
+    ? { label: '대기', cls: 'text-newTextColor/70 bg-newTableBorder' }
+    : job?.state === 'failed'
+    ? { label: '실패', cls: 'text-red-300 bg-red-500/20' }
+    : job?.state === 'aborted'
+    ? { label: '중단됨', cls: 'text-newTextColor/70 bg-newTableBorder' }
+    : null;
+
+// 큐 스트립 — 지금 뭐가 도는지 / 얼마나 남았는지 / 뭐가 깨졌는지 한 곳에서 답한다.
+const RenderQueue: FC<{
+  jobs: Job[];
+  elapsed: number;
+  aborting: boolean;
+  onAbort: () => void;
+  onRetry: () => void;
+  onClear: () => void;
+}> = ({ jobs, elapsed, aborting, onAbort, onRetry, onClear }) => {
+  const done = jobs.filter((j) => j.state === 'done');
+  const failed = jobs.filter((j) => j.state === 'failed');
+  const aborted = jobs.filter((j) => j.state === 'aborted');
+  const running = jobs.find((j) => j.state === 'running');
+  const settled = done.length + failed.length + aborted.length;
+  const pct = Math.round((settled / jobs.length) * 100);
+  const avgMs = done.length
+    ? done.reduce((a, j) => a + (j.ms ?? 0), 0) / done.length
+    : 0;
+  const retryable = failed.length + aborted.length;
+  // 실패가 많으면 스트립이 페이지를 삼킨다 — 앞 5개만 펼치고 나머지는 목록의 칩으로 본다.
+  const shown = failed.slice(0, 5);
+
+  return (
+    <div className="border border-newTableBorder rounded-[8px] overflow-hidden">
+      <div className="flex items-center gap-[10px] px-[12px] py-[10px] bg-newBgColor">
+        <span className="text-textColor font-[600]">렌더 큐</span>
+        <span className="text-[13px] text-newTextColor/70 tabular-nums">
+          {settled}/{jobs.length}
+          {running && avgMs > 0
+            ? ` · 남은 시간 ${etaText(avgMs, jobs.length - settled)}`
+            : ''}
+        </span>
+        <div className="flex-1" />
+        {running ? (
+          <button
+            type="button"
+            className="text-[13px] text-forth hover:underline disabled:opacity-50 disabled:no-underline"
+            disabled={aborting}
+            onClick={onAbort}
+          >
+            {aborting ? '현재 항목 끝나면 중단' : '남은 항목 중단'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="text-[13px] text-newTextColor/70 hover:underline"
+            onClick={onClear}
+          >
+            큐 지우기
+          </button>
+        )}
+      </div>
+
+      <div
+        className="h-[4px] bg-newTableBorder"
+        role="progressbar"
+        aria-label="렌더 진행률"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div
+          className="h-full bg-forth transition-[width] duration-500 motion-reduce:transition-none"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <div className="px-[12px] py-[10px] flex items-center gap-[10px] text-[14px]">
+        {running ? (
+          <>
+            <span className="w-[6px] h-[6px] rounded-full bg-forth animate-pulse motion-reduce:animate-none shrink-0" />
+            {/* 초 단위 타이머는 aria-live 밖에 둔다 — 안에 넣으면 매초 읽어버린다. */}
+            <span className="text-textColor truncate flex-1" aria-live="polite">
+              {running.hook}
+            </span>
+            <span className="text-[12px] text-newTextColor/60">
+              {running.format}
+            </span>
+            <span className="text-[13px] text-textColor tabular-nums">
+              {mmss(elapsed)}
+            </span>
+          </>
+        ) : (
+          <span className="text-newTextColor/70" aria-live="polite">
+            렌더 완료 {done.length}개
+            {failed.length ? ` · 실패 ${failed.length}개` : ''}
+            {aborted.length ? ` · 중단 ${aborted.length}개` : ''}
+          </span>
+        )}
+      </div>
+
+      {failed.length > 0 && (
+        <div className="border-t border-newTableBorder">
+          {shown.map((j) => (
+            <div
+              key={j.id}
+              className="flex items-center gap-[8px] px-[12px] py-[6px] text-[13px]"
+            >
+              <span className="text-red-300 shrink-0">✕</span>
+              <span className="text-textColor truncate max-w-[280px]">
+                {j.hook}
+              </span>
+              <span className="text-[12px] text-newTextColor/60 truncate flex-1">
+                {j.error}
+              </span>
+            </div>
+          ))}
+          {failed.length > shown.length && (
+            <div className="px-[12px] py-[6px] text-[12px] text-newTextColor/60">
+              외 {failed.length - shown.length}개 — 목록에서 「실패」 칩으로
+              확인하세요
+            </div>
+          )}
+        </div>
+      )}
+
+      {!running && retryable > 0 && (
+        <div className="px-[12px] py-[10px] border-t border-newTableBorder">
+          <Button secondary onClick={onRetry}>
+            다시 렌더 ({retryable})
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // 렌더된 변형은 실제 프레임을 보여준다 — 텍스트 표만 보고 어느 게 어느 건지
 // 알아내야 했던 게 이 화면의 제일 큰 불만이었다.
 const Thumb: FC<{ variant: Variant }> = ({ variant }) =>
@@ -172,15 +345,17 @@ const VariantRow: FC<{
   variant: Variant;
   selected: boolean;
   checked: boolean;
-  rendering: boolean;
+  job?: Job;
+  elapsed: number;
   onCheck: () => void;
   onEdit: () => void;
   onDelete: () => void;
-}> = ({ variant, selected, checked, rendering, onCheck, onEdit, onDelete }) => {
-  const chip = STATUS_CHIP[variant.status] ?? {
-    label: variant.status,
-    cls: 'text-gray-300 bg-gray-500/20',
-  };
+}> = ({ variant, selected, checked, job, elapsed, onCheck, onEdit, onDelete }) => {
+  const chip = jobChip(job, elapsed) ??
+    STATUS_CHIP[variant.status] ?? {
+      label: variant.status,
+      cls: 'text-gray-300 bg-gray-500/20',
+    };
   return (
     <div
       className={`group flex items-center gap-[10px] px-[12px] py-[8px] border-b border-newTableBorder text-[14px] cursor-pointer hover:bg-newBgColor ${
@@ -207,11 +382,16 @@ const VariantRow: FC<{
             {FORMAT_LABELS[variant.format] ?? variant.format}
           </span>
           <span
-            className={`px-[8px] py-[1px] rounded-full text-[11px] ${chip.cls}`}
+            className={`px-[8px] py-[1px] rounded-full text-[11px] tabular-nums ${chip.cls}`}
           >
-            {rendering ? '렌더 중…' : chip.label}
+            {chip.label}
           </span>
         </div>
+        {job?.state === 'failed' && job.error && (
+          <div className="truncate text-[11px] text-red-300/80">
+            {job.error}
+          </div>
+        )}
       </div>
       <button
         type="button"
@@ -247,8 +427,30 @@ export const VideoStudioComponent: FC = () => {
     null
   );
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [renderingIds, setRenderingIds] = useState<Set<string>>(new Set());
+
+  // 렌더 큐 상태 — 단일·일괄·재시도가 같은 경로를 쓴다.
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [elapsed, setElapsed] = useState(0);
+  const [aborting, setAborting] = useState(false);
+  const abortRef = useRef(false);
+  const queueRunningRef = useRef(false);
+  const startedAtRef = useRef<number | null>(null);
+
+  const queueActive = jobs.some((j) => j.state === 'running');
+  const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
+
+  // 경과 타이머는 큐 전체에 하나만 — 행마다 타이머를 두지 않는다.
+  useEffect(() => {
+    if (!queueActive) return;
+    const t = setInterval(
+      () =>
+        setElapsed(
+          startedAtRef.current ? Date.now() - startedAtRef.current : 0
+        ),
+      1000
+    );
+    return () => clearInterval(t);
+  }, [queueActive, jobs]);
 
   // 편집기가 알려주는 "저장 안 한 변경" 플래그 — ref 라서 리렌더를 안 일으킨다.
   const dirtyRef = useRef(false);
@@ -434,34 +636,102 @@ export const VideoStudioComponent: FC = () => {
     [fetch, selectedVariantId, mutateVariants, toaster]
   );
 
-  const renderVariant = useCallback(
-    async (variantId: string) => {
-      setRenderingIds((prev) => new Set(prev).add(variantId));
-      toaster.show('렌더 시작 — 1분쯤 걸립니다');
-      try {
-        const res = await fetch(`/video-studio/variants/${variantId}/render`, {
-          method: 'POST',
-        });
-        if (!res.ok) {
-          let message = '렌더 실패';
-          try {
-            message = (await res.json())?.message ?? message;
-          } catch {}
-          toaster.show(String(message), 'warning');
-          return;
+  // 렌더 큐 실행 — 단일 렌더·일괄 렌더·재시도가 전부 여기로 들어온다.
+  // 렌더 서비스가 1건씩 처리하므로 직렬. 진행 상황은 화면의 큐 스트립이 계속 보여준다.
+  const runQueue = useCallback(
+    async (ids: string[]) => {
+      if (!ids.length || queueRunningRef.current) return;
+      queueRunningRef.current = true;
+      abortRef.current = false;
+      setAborting(false);
+      setJobs(
+        ids.map((id) => {
+          const v = variants?.find((x) => x.id === id);
+          return {
+            id,
+            hook: v?.hook || '(제목 없음)',
+            format: v ? FORMAT_LABELS[v.format] ?? v.format : '',
+            state: 'queued' as JobState,
+          };
+        })
+      );
+
+      let ok = 0;
+      let bad = 0;
+      for (const id of ids) {
+        if (abortRef.current) {
+          setJobs((prev) =>
+            prev.map((j) =>
+              j.state === 'queued' ? { ...j, state: 'aborted' } : j
+            )
+          );
+          break;
         }
+
+        startedAtRef.current = Date.now();
+        setElapsed(0);
+        setJobs((prev) =>
+          prev.map((j) => (j.id === id ? { ...j, state: 'running' } : j))
+        );
+
+        let error: string | undefined;
+        try {
+          const res = await fetch(`/video-studio/variants/${id}/render`, {
+            method: 'POST',
+          });
+          if (!res.ok) {
+            error = `렌더 실패 (${res.status})`;
+            try {
+              error = (await res.json())?.message ?? error;
+            } catch {}
+          }
+        } catch (e: any) {
+          error = e?.message || '렌더 서비스 응답 없음';
+        }
+
+        const ms = Date.now() - (startedAtRef.current ?? Date.now());
+        error ? bad++ : ok++;
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === id
+              ? { ...j, state: error ? 'failed' : 'done', error, ms }
+              : j
+          )
+        );
         await mutateVariants();
-        toaster.show('렌더 완료 — 게시 버튼이 활성화됐습니다', 'success');
-      } finally {
-        setRenderingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(variantId);
-          return next;
-        });
       }
+
+      startedAtRef.current = null;
+      queueRunningRef.current = false;
+      setAborting(false);
+      toaster.show(
+        `렌더 끝 — 완료 ${ok}개${bad ? `, 실패 ${bad}개` : ''}`,
+        bad ? 'warning' : 'success'
+      );
     },
-    [fetch, mutateVariants, toaster]
+    [fetch, variants, mutateVariants, toaster]
   );
+
+  const renderVariant = useCallback(
+    (variantId: string) => runQueue([variantId]),
+    [runQueue]
+  );
+
+  // 실패 + 중단(=아직 안 돌린 것)을 원래 큐 순서 그대로 다시 넣는다.
+  const retryQueue = useCallback(
+    () =>
+      runQueue(
+        jobs
+          .filter((j) => j.state === 'failed' || j.state === 'aborted')
+          .map((j) => j.id)
+      ),
+    [jobs, runQueue]
+  );
+
+  const abortQueue = useCallback(() => {
+    abortRef.current = true;
+    setAborting(true);
+  }, []);
 
   // 양산 임포트 — 렌더 서비스 레지스트리(정적+생성엔진 전체)에서 없는 것만 추가
   const importRegistry = useCallback(async () => {
@@ -487,28 +757,14 @@ export const VideoStudioComponent: FC = () => {
     );
   }, [fetch, activeBrandId, mutateVariants, toaster]);
 
-  // 일괄 렌더 — 체크된 변형을 순차 렌더 (렌더 서비스가 1건씩 처리하므로 직렬)
-  const bulkRender = useCallback(async () => {
+  // 일괄 렌더 — 체크된 변형을 큐에 넣는다.
+  const bulkRender = useCallback(() => {
+    // 큐가 이미 도는 중이면 runQueue 가 무시한다 — 체크를 먼저 지우면 선택이 조용히 증발한다.
+    if (queueRunningRef.current) return;
     const ids = [...checkedIds];
-    if (!ids.length || bulkBusy) return;
-    setBulkBusy(true);
-    let done = 0;
-    let failed = 0;
-    for (const id of ids) {
-      toaster.show(`일괄 렌더 ${done + failed + 1}/${ids.length}…`);
-      const res = await fetch(`/video-studio/variants/${id}/render`, {
-        method: 'POST',
-      });
-      res.ok ? done++ : failed++;
-      await mutateVariants();
-    }
-    setBulkBusy(false);
     setCheckedIds(new Set());
-    toaster.show(
-      `일괄 렌더 끝: 성공 ${done}${failed ? `, 실패 ${failed}` : ''}`,
-      failed ? 'warning' : 'success'
-    );
-  }, [checkedIds, bulkBusy, fetch, mutateVariants, toaster]);
+    return runQueue(ids);
+  }, [checkedIds, runQueue]);
 
   // 렌더된 Media + 캡션을 기존 컴포저(AddEditModal)에 프리로드해서 연다 —
   // 채널 선택·시간·프로바이더별 설정은 전부 컴포저 UX 를 재사용 (standalone.modal 패턴).
@@ -667,6 +923,18 @@ export const VideoStudioComponent: FC = () => {
         </Button>
       </div>
 
+      {/* 렌더 큐 — 도는 동안, 그리고 끝난 뒤에도 결과를 들고 남는다 */}
+      {jobs.length > 0 && (
+        <RenderQueue
+          jobs={jobs}
+          elapsed={elapsed}
+          aborting={aborting}
+          onAbort={abortQueue}
+          onRetry={retryQueue}
+          onClear={() => setJobs([])}
+        />
+      )}
+
       {/* 목록(좌) + 편집기(우) — 행을 클릭해도 레이아웃이 밀리지 않는다.
           예전엔 편집기가 목록 위에 끼어들어 화면이 통째로 튀었다. */}
       <div className="flex flex-col lg:flex-row gap-[15px] flex-1 min-h-0">
@@ -704,10 +972,12 @@ export const VideoStudioComponent: FC = () => {
               />
               <span className="flex-1">전체 선택</span>
               {checkedIds.size > 0 && (
-                <Button secondary onClick={bulkRender} disabled={bulkBusy}>
-                  {bulkBusy
-                    ? '일괄 렌더 중…'
-                    : `선택 ${checkedIds.size}개 렌더`}
+                <Button
+                  secondary
+                  onClick={bulkRender}
+                  disabled={queueActive}
+                >
+                  선택 {checkedIds.size}개 렌더
                 </Button>
               )}
             </div>
@@ -719,7 +989,8 @@ export const VideoStudioComponent: FC = () => {
                 variant={v}
                 selected={v.id === selectedVariantId}
                 checked={checkedIds.has(v.id)}
-                rendering={renderingIds.has(v.id)}
+                job={jobById.get(v.id)}
+                elapsed={elapsed}
                 onCheck={() =>
                   setCheckedIds((prev) => {
                     const next = new Set(prev);
@@ -748,6 +1019,7 @@ export const VideoStudioComponent: FC = () => {
               onSave={saveVariant}
               onRender={() => renderVariant(activeVariant.id)}
               onSendToComposer={() => sendToComposer(activeVariant)}
+              queueActive={queueActive}
               onDirtyChange={setDirty}
               onDelete={() => deleteVariant(activeVariant)}
             />
