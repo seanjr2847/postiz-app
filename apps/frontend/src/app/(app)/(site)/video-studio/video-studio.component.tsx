@@ -42,6 +42,12 @@ export interface Variant {
   mediaId?: string | null;
   postId?: string | null;
   media?: { id: string; path: string } | null; // 백엔드가 mediaId 로 수동 조인
+  // 렌더 큐 — 서버가 소유한다. null 이면 큐 밖.
+  renderState?: JobState | null;
+  renderError?: string | null;
+  renderQueuedAt?: string | null;
+  renderStartedAt?: string | null;
+  renderMs?: number | null;
 }
 
 // The 14 brand tokens (order = editor layout). Names shared across all brands.
@@ -136,7 +142,17 @@ const useVariants = (brandId: string | null) => {
   }, [fetch, brandId]);
   return useSWR<Variant[]>(
     brandId ? `video-studio-variants-${brandId}` : null,
-    load
+    load,
+    {
+      // 렌더 큐는 서버에 있고 진행 상황은 이 응답에 실려 온다 — 큐가 도는 동안만 폴링한다.
+      // 새로고침해도 큐가 그대로 보이는 이유가 이것이다(예전엔 브라우저 메모리에만 있었다).
+      refreshInterval: (data) =>
+        (data ?? []).some(
+          (v) => v.renderState === 'queued' || v.renderState === 'running'
+        )
+          ? 2000
+          : 0,
+    }
   );
 };
 
@@ -159,8 +175,8 @@ export const STATUS_CHIP: Record<
 // 들고 화면에 계속 띄운다. 실패는 지우지 않고 남겨서 다시 렌더할 수 있게 한다.
 // 'aborted' 는 'failed' 와 따로 둔다 — 사용자가 일부러 멈춘 것을 실패로 칠하면
 // 정확히 이 화면이 없애려던 혼동을 다시 만든다.
-// ponytail: 새로고침하면 큐는 사라진다(렌더 자체는 서버에서 계속 돌고 DB 에 반영됨).
-//           살아남게 하려면 백엔드 job 테이블 + 폴링이 필요 — 그때 올린다.
+// 큐는 서버가 소유한다 — 변형 행의 render* 필드가 곧 큐이고, 이 화면은 목록을
+// 폴링해 비추기만 한다. 그래서 새로고침하거나 탭을 닫아도 남은 항목이 계속 렌더된다.
 // ---------------------------------------------------------------------------
 type JobState = 'queued' | 'running' | 'done' | 'failed' | 'aborted';
 
@@ -171,6 +187,8 @@ interface Job {
   state: JobState;
   error?: string;
   ms?: number;
+  /** 서버가 찍은 시작 시각(ms). 경과 시간은 여기서 잰다 — 새로고침해도 이어진다. */
+  startedAt?: number;
 }
 
 const mmss = (ms: number) => {
@@ -431,29 +449,10 @@ export const VideoStudioComponent: FC = () => {
   );
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
-  // 렌더 큐 상태 — 단일·일괄·재시도가 같은 경로를 쓴다.
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [elapsed, setElapsed] = useState(0);
+  // 「남은 항목 중단」을 누른 뒤 도는 중인 한 건이 끝나기를 기다리는 동안만 참.
   const [aborting, setAborting] = useState(false);
-  const abortRef = useRef(false);
-  const queueRunningRef = useRef(false);
-  const startedAtRef = useRef<number | null>(null);
-
-  const queueActive = jobs.some((j) => j.state === 'running');
-  const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
-
-  // 경과 타이머는 큐 전체에 하나만 — 행마다 타이머를 두지 않는다.
-  useEffect(() => {
-    if (!queueActive) return;
-    const t = setInterval(
-      () =>
-        setElapsed(
-          startedAtRef.current ? Date.now() - startedAtRef.current : 0
-        ),
-      1000
-    );
-    return () => clearInterval(t);
-  }, [queueActive, jobs]);
+  // 경과 시간 표시용 시계. 큐가 도는 동안만 간다 (타이머는 큐 전체에 하나).
+  const [now, setNow] = useState(() => Date.now());
 
   // 편집기가 알려주는 "저장 안 한 변경" 플래그 — ref 라서 리렌더를 안 일으킨다.
   const dirtyRef = useRef(false);
@@ -497,6 +496,49 @@ export const VideoStudioComponent: FC = () => {
     () => variants?.find((v) => v.id === selectedVariantId) ?? null,
     [variants, selectedVariantId]
   );
+
+  // 큐는 변형 목록에서 파생된다 — 화면이 들고 있는 상태가 아니라 서버 상태의 투영이다.
+  // 등록 순서(renderQueuedAt)로 정렬해야 "지금 무엇이 도는가"가 뒤섞이지 않는다.
+  const jobs = useMemo<Job[]>(
+    () =>
+      (variants ?? [])
+        .filter((v) => !!v.renderState)
+        .sort((a, b) =>
+          (a.renderQueuedAt ?? '').localeCompare(b.renderQueuedAt ?? '')
+        )
+        .map((v) => ({
+          id: v.id,
+          hook: v.hook || '(제목 없음)',
+          format: FORMAT_LABELS[v.format] ?? v.format,
+          state: v.renderState as JobState,
+          error: v.renderError ?? undefined,
+          ms: v.renderMs ?? undefined,
+          startedAt: v.renderStartedAt
+            ? Date.parse(v.renderStartedAt)
+            : undefined,
+        })),
+    [variants]
+  );
+
+  const runningJob = jobs.find((j) => j.state === 'running');
+  // 「렌더 중」 잠금은 대기분까지 포함한다 — 큐가 남아 있는데 새 큐를 밀어 넣으면 순서가 엉킨다.
+  const queueActive = jobs.some(
+    (j) => j.state === 'running' || j.state === 'queued'
+  );
+  const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
+  const isRunning = !!runningJob;
+  const elapsed = runningJob?.startedAt
+    ? Math.max(0, now - runningJob.startedAt)
+    : 0;
+
+  useEffect(() => {
+    if (!isRunning) {
+      setAborting(false); // 도는 항목이 끝나면 「중단」 라벨을 원래대로
+      return;
+    }
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [isRunning]);
 
   // --- brand actions ---
   const createBrand = useCallback(async () => {
@@ -639,80 +681,29 @@ export const VideoStudioComponent: FC = () => {
     [fetch, selectedVariantId, mutateVariants, toaster]
   );
 
-  // 렌더 큐 실행 — 단일 렌더·일괄 렌더·재시도가 전부 여기로 들어온다.
-  // 렌더 서비스가 1건씩 처리하므로 직렬. 진행 상황은 화면의 큐 스트립이 계속 보여준다.
+  // 렌더 큐 등록 — 단일 렌더·일괄 렌더·재시도가 전부 여기로 들어온다.
+  // 실제 진행은 서버 펌프가 하고(렌더 서비스가 1건씩 처리하므로 직렬), 이 화면은 폴링으로 비춘다.
+  // 그래서 등록 뒤 브라우저를 닫아도 남은 항목이 계속 렌더된다.
   const runQueue = useCallback(
     async (ids: string[]) => {
-      if (!ids.length || queueRunningRef.current) return;
-      queueRunningRef.current = true;
-      abortRef.current = false;
-      setAborting(false);
-      setJobs(
-        ids.map((id) => {
-          const v = variants?.find((x) => x.id === id);
-          return {
-            id,
-            hook: v?.hook || '(제목 없음)',
-            format: v ? FORMAT_LABELS[v.format] ?? v.format : '',
-            state: 'queued' as JobState,
-          };
-        })
-      );
-
-      let ok = 0;
-      let bad = 0;
-      for (const id of ids) {
-        if (abortRef.current) {
-          setJobs((prev) =>
-            prev.map((j) =>
-              j.state === 'queued' ? { ...j, state: 'aborted' } : j
-            )
-          );
-          break;
-        }
-
-        startedAtRef.current = Date.now();
-        setElapsed(0);
-        setJobs((prev) =>
-          prev.map((j) => (j.id === id ? { ...j, state: 'running' } : j))
-        );
-
-        let error: string | undefined;
+      if (!ids.length) return;
+      const res = await fetch('/video-studio/render-jobs', {
+        method: 'POST',
+        body: JSON.stringify({ variantIds: ids }),
+      });
+      if (!res.ok) {
+        let message = '렌더 큐 등록 실패';
         try {
-          const res = await fetch(`/video-studio/variants/${id}/render`, {
-            method: 'POST',
-          });
-          if (!res.ok) {
-            error = `렌더 실패 (${res.status})`;
-            try {
-              error = (await res.json())?.message ?? error;
-            } catch {}
-          }
-        } catch (e: any) {
-          error = e?.message || '렌더 서비스 응답 없음';
-        }
-
-        const ms = Date.now() - (startedAtRef.current ?? Date.now());
-        error ? bad++ : ok++;
-        setJobs((prev) =>
-          prev.map((j) =>
-            j.id === id
-              ? { ...j, state: error ? 'failed' : 'done', error, ms }
-              : j
-          )
-        );
-        await mutateVariants();
+          message = (await res.json())?.message ?? message;
+        } catch {}
+        toaster.show(String(message), 'warning');
+        return;
       }
-
-      startedAtRef.current = null;
-      queueRunningRef.current = false;
       setAborting(false);
-      toaster.show(
-        `렌더 끝 — 완료 ${ok}개${bad ? `, 실패 ${bad}개` : ''}`,
-        bad ? 'warning' : 'success'
-      );
+      await mutateVariants();
+      toaster.show(`렌더 큐에 ${ids.length}개 넣음`, 'success');
     },
-    [fetch, variants, mutateVariants, toaster]
+    [fetch, mutateVariants, toaster]
   );
 
   const renderVariant = useCallback(
@@ -731,10 +722,17 @@ export const VideoStudioComponent: FC = () => {
     [jobs, runQueue]
   );
 
-  const abortQueue = useCallback(() => {
-    abortRef.current = true;
+  // 남은 대기분만 중단한다 — 도는 중인 1건은 서버에서 끝까지 간다(끊으면 반쪽 mp4 가 남는다).
+  const abortQueue = useCallback(async () => {
     setAborting(true);
-  }, []);
+    await fetch('/video-studio/render-jobs/abort', { method: 'POST' });
+    await mutateVariants();
+  }, [fetch, mutateVariants]);
+
+  const clearQueue = useCallback(async () => {
+    await fetch('/video-studio/render-jobs', { method: 'DELETE' });
+    await mutateVariants();
+  }, [fetch, mutateVariants]);
 
   // 양산 임포트 — 렌더 서비스 레지스트리(정적+생성엔진 전체)에서 없는 것만 추가
   const importRegistry = useCallback(async () => {
@@ -762,12 +760,12 @@ export const VideoStudioComponent: FC = () => {
 
   // 일괄 렌더 — 체크된 변형을 큐에 넣는다.
   const bulkRender = useCallback(() => {
-    // 큐가 이미 도는 중이면 runQueue 가 무시한다 — 체크를 먼저 지우면 선택이 조용히 증발한다.
-    if (queueRunningRef.current) return;
+    // 큐가 아직 남아 있으면 아무것도 하지 않는다 — 체크를 먼저 지우면 선택이 조용히 증발한다.
+    if (queueActive) return;
     const ids = [...checkedIds];
     setCheckedIds(new Set());
     return runQueue(ids);
-  }, [checkedIds, runQueue]);
+  }, [checkedIds, queueActive, runQueue]);
 
   // 렌더된 Media + 캡션을 기존 컴포저(AddEditModal)에 프리로드해서 연다 —
   // 채널 선택·시간·프로바이더별 설정은 전부 컴포저 UX 를 재사용 (standalone.modal 패턴).
@@ -934,7 +932,7 @@ export const VideoStudioComponent: FC = () => {
           aborting={aborting}
           onAbort={abortQueue}
           onRetry={retryQueue}
-          onClear={() => setJobs([])}
+          onClear={clearQueue}
         />
       )}
 

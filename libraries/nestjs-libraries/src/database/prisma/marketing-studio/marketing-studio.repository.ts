@@ -208,4 +208,95 @@ export class MarketingStudioRepository {
       },
     });
   }
+
+  // ---- 렌더 큐 ----
+  // 큐를 변형 행 위에 얹는다. 별도 job 테이블을 안 쓰는 이유: 프론트가 이미 변형 목록을
+  // 폴링하므로 큐 상태가 그 응답에 실려 오면 조회 엔드포인트가 하나도 안 늘어난다.
+
+  /** 큐에 넣는다(이미 큐에 있던 결과는 덮어쓴다). 등록 순서를 renderQueuedAt 에 굳힌다. */
+  async enqueueRender(orgId: string, ids: string[]) {
+    // 같은 밀리초에 여러 건이 들어가면 정렬이 무너져 "지금 무엇이 도는가"가 뒤섞인다 —
+    // 인덱스만큼 밀어 등록 순서를 그대로 남긴다.
+    const base = Date.now();
+    let queued = 0;
+    for (const [i, id] of ids.entries()) {
+      const { count } = await this._variant.model.marketingVariant.updateMany({
+        where: { id, organizationId: orgId, deletedAt: null },
+        data: {
+          renderState: 'queued',
+          renderError: null,
+          renderQueuedAt: new Date(base + i),
+          renderStartedAt: null,
+          renderMs: null,
+        },
+      });
+      queued += count;
+    }
+    return queued;
+  }
+
+  /** 다음 대기 항목 1건. 렌더 서비스가 1건씩 처리하므로 큐도 직렬이다. */
+  nextQueuedRender(orgId: string) {
+    return this._variant.model.marketingVariant.findFirst({
+      where: { organizationId: orgId, renderState: 'queued', deletedAt: null },
+      orderBy: { renderQueuedAt: 'asc' },
+    });
+  }
+
+  markRenderRunning(orgId: string, id: string) {
+    return this._variant.model.marketingVariant.updateMany({
+      where: { id, organizationId: orgId },
+      data: { renderState: 'running', renderStartedAt: new Date() },
+    });
+  }
+
+  finishRender(
+    orgId: string,
+    id: string,
+    state: 'done' | 'failed',
+    ms: number,
+    error?: string
+  ) {
+    return this._variant.model.marketingVariant.updateMany({
+      where: { id, organizationId: orgId },
+      data: { renderState: state, renderMs: ms, renderError: error ?? null },
+    });
+  }
+
+  /** 남은 대기분만 중단 — 도는 중인 1건은 끝까지 간다(중간에 끊으면 반쪽 mp4 가 남는다). */
+  abortQueuedRenders(orgId: string) {
+    return this._variant.model.marketingVariant.updateMany({
+      where: { organizationId: orgId, renderState: 'queued' },
+      data: { renderState: 'aborted' },
+    });
+  }
+
+  /** 끝난 것만 큐에서 치운다(사용자의 "큐 지우기"). 대기·진행 중은 건드리지 않는다. */
+  clearFinishedRenders(orgId: string) {
+    return this._variant.model.marketingVariant.updateMany({
+      where: {
+        organizationId: orgId,
+        renderState: { in: ['done', 'failed', 'aborted'] },
+      },
+      data: { renderState: null, renderError: null, renderQueuedAt: null },
+    });
+  }
+
+  /**
+   * 백엔드가 렌더 도중 죽으면 running 이 영영 남아 UI 가 계속 "렌더 중"을 보여준다.
+   * 펌프를 켤 때마다 오래된 running 을 실패로 떨군다.
+   */
+  reapStaleRenders(orgId: string, olderThan: Date) {
+    return this._variant.model.marketingVariant.updateMany({
+      where: {
+        organizationId: orgId,
+        renderState: 'running',
+        renderStartedAt: { lt: olderThan },
+      },
+      data: {
+        renderState: 'failed',
+        renderError: '렌더 중 서버가 재시작됐습니다 — 다시 렌더하세요',
+      },
+    });
+  }
 }

@@ -69,7 +69,7 @@ export class VideoStudioController {
     @GetOrgFromRequest() org: Organization,
     @Query('brandId') brandId?: string
   ) {
-    return this._marketingStudioService.getVariants(org.id, brandId);
+    return this._marketingStudioService.getVariants(org, brandId);
   }
 
   @Get('/variants/:id')
@@ -105,12 +105,28 @@ export class VideoStudioController {
     return this._marketingStudioService.deleteVariant(org.id, id);
   }
 
-  @Post('/variants/:id/render')
-  renderVariant(
+  // ---- 렌더 큐 ----
+  // 큐는 서버가 소유한다 — 새로고침·탭 종료에도 남은 항목이 계속 렌더된다.
+  // 진행 상황은 별도 조회 없이 GET /variants 응답의 render* 필드로 나간다.
+  // (예전의 동기 POST /variants/:id/render 는 큐와 동시에 돌면 렌더 서비스를 이중으로
+  //  때리므로 없앴다. 단일 렌더도 항목 1개짜리 큐다.)
+
+  @Post('/render-jobs')
+  enqueueRenders(
     @GetOrgFromRequest() org: Organization,
-    @Param('id') id: string
+    @Body() body: { variantIds: string[] }
   ) {
-    return this._marketingStudioService.render(org, id);
+    return this._marketingStudioService.enqueueRenders(org, body?.variantIds);
+  }
+
+  @Post('/render-jobs/abort')
+  abortRenders(@GetOrgFromRequest() org: Organization) {
+    return this._marketingStudioService.abortRenders(org.id);
+  }
+
+  @Delete('/render-jobs')
+  clearRenderQueue(@GetOrgFromRequest() org: Organization) {
+    return this._marketingStudioService.clearRenderQueue(org.id);
   }
 
   // 게시는 프론트가 렌더된 Media 를 기존 컴포저(AddEditModal)에 프리로드해 처리 —

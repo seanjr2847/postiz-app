@@ -255,6 +255,13 @@ model MarketingVariant {
   hashtags       String   @default("[]") // JSON string[]
   mediaId        String?  // 렌더 결과 Postiz Media.id
   postId         String?  // 스케줄된 Post.id
+  // 렌더 큐 — 서버가 소유한다. 브라우저가 큐를 들고 있으면 새로고침 한 번에 사라졌다.
+  // null = 큐 밖. queued | running | done | failed | aborted.
+  renderState     String?
+  renderError     String?
+  renderQueuedAt  DateTime? // 큐 순서 (등록 순)
+  renderStartedAt DateTime? // 경과 시간 표시의 기준
+  renderMs        Int?      // 걸린 시간 — 남은 시간(ETA) 평균 계산용
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   deletedAt      DateTime?
@@ -264,6 +271,7 @@ model MarketingVariant {
   @@index([organizationId])
   @@index([brandId])
   @@index([status])
+  @@index([renderState, renderQueuedAt])
 }
 
 model SocialMediaAgency {

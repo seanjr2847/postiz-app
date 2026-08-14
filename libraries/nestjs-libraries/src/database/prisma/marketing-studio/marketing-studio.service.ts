@@ -61,8 +61,14 @@ export class MarketingStudioService {
 
   // ---- Variants ----
 
-  getVariants(orgId: string, brandId?: string) {
-    return this._repository.getVariants(orgId, brandId);
+  async getVariants(org: Organization, brandId?: string) {
+    const variants = await this._repository.getVariants(org.id, brandId);
+    // 자가 복구 — 프로세스가 큐 도중 죽으면 queued 가 아무도 안 집는 채로 남는다.
+    // 목록을 볼 때마다 펌프를 깨운다(멱등: 이미 돌고 있으면 즉시 반환).
+    if (variants.some((v) => v?.renderState === 'queued')) {
+      this.pumpRenderQueue(org).catch(() => {});
+    }
+    return variants;
   }
 
   getVariant(orgId: string, id: string) {
@@ -124,6 +130,81 @@ export class MarketingStudioService {
     await this._repository.setVariantMedia(org.id, variantId, media.id);
     await this._repository.renameMedia(media.id, mediaLabel(brand.name, variant));
     return media;
+  }
+
+  // ---- 렌더 큐 (서버 소유) ----
+  //
+  // 예전엔 브라우저가 큐를 들고 렌더를 한 건씩 동기 POST 로 돌렸다. 새로고침하거나 탭을 닫으면
+  // 큐가 통째로 증발했고(도는 중이던 렌더만 서버에서 살아남았다), 남은 항목은 아무도 안 집었다.
+  // 이제 큐는 DB(변형 행의 render* 필드)에 있고 이 프로세스의 펌프가 소비한다 —
+  // 브라우저는 목록을 폴링해 상태를 비추기만 한다.
+  //
+  // ponytail: 펌프는 이 프로세스 안에만 있다(백엔드 1인스턴스 전제). 인스턴스를 늘리면
+  //           두 펌프가 같은 항목을 집을 수 있다 — 그때 DB 레벨 claim(조건부 update)으로 올린다.
+
+  /** 렌더 도중 죽은 것으로 보는 시간. 가장 긴 실측 렌더가 70초대라 넉넉히 잡았다. */
+  private static readonly RENDER_STALE_MS = 15 * 60 * 1000;
+
+  /** 지금 펌프가 도는 조직. 같은 조직에 펌프가 둘 붙지 않게 한다. */
+  private _pumping = new Set<string>();
+
+  /** 큐에 넣고 펌프를 깨운다. 응답은 기다리지 않는다 — 진행은 목록 폴링으로 본다. */
+  async enqueueRenders(org: Organization, variantIds: string[]) {
+    if (!variantIds?.length) {
+      throw new BadRequestException('variantIds required');
+    }
+    const queued = await this._repository.enqueueRender(org.id, variantIds);
+    this.pumpRenderQueue(org).catch(() => {});
+    return { queued };
+  }
+
+  abortRenders(orgId: string) {
+    return this._repository.abortQueuedRenders(orgId);
+  }
+
+  clearRenderQueue(orgId: string) {
+    return this._repository.clearFinishedRenders(orgId);
+  }
+
+  /** 대기 항목이 없어질 때까지 한 건씩 렌더한다. 실패는 큐를 멈추지 않는다. */
+  async pumpRenderQueue(org: Organization) {
+    if (this._pumping.has(org.id)) {
+      return;
+    }
+    this._pumping.add(org.id);
+    try {
+      await this._repository.reapStaleRenders(
+        org.id,
+        new Date(Date.now() - MarketingStudioService.RENDER_STALE_MS)
+      );
+      for (;;) {
+        const next = await this._repository.nextQueuedRender(org.id);
+        if (!next) {
+          return;
+        }
+        await this._repository.markRenderRunning(org.id, next.id);
+        const startedAt = Date.now();
+        try {
+          await this.render(org, next.id);
+          await this._repository.finishRender(
+            org.id,
+            next.id,
+            'done',
+            Date.now() - startedAt
+          );
+        } catch (e: any) {
+          await this._repository.finishRender(
+            org.id,
+            next.id,
+            'failed',
+            Date.now() - startedAt,
+            String(e?.message ?? e).slice(0, 300)
+          );
+        }
+      }
+    } finally {
+      this._pumping.delete(org.id);
+    }
   }
 
   private renderBase() {
